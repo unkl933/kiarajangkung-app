@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "347068218001",
+    "project_id": "kiarajangkung-app",
+    "storage_bucket": "kiarajangkung-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:347068218001:android:cd7ba3b245558965a79d30",
+        "android_client_info": {
+          "package_name": "com.unkl.kiarajangkung"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCTqS7IGFn9qt0M1OIFdH7r9gft3gUngV0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
