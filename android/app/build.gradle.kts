@@ -29,15 +29,16 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            keyAlias = keystoreProperties.getProperty("keyAlias")
-            keyPassword = keystoreProperties.getProperty("keyPassword")
-            storeFile = keystoreProperties.getProperty("storeFile")?.let {
-                file(it)
-            }
-            storePassword = keystoreProperties.getProperty("storePassword")
+    create("release") {
+        keyAlias = keystoreProperties.getProperty("keyAlias")
+        keyPassword = keystoreProperties.getProperty("keyPassword")
+        storeFile = keystoreProperties.getProperty("storeFile")?.let {
+            file(it)
         }
+        storePassword = keystoreProperties.getProperty("storePassword")
+        storeType = "PKCS12"
     }
+}
 
     defaultConfig {
         applicationId = "com.unkl.kiarajangkung"
