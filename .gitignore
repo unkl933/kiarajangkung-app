@@ -46,3 +46,37 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+
+# Flutter
+.dart_tool/
+.packages
+.pub-cache/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Android
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
+android/*.jks
+android/*.keystore
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Signing files
+*.jks
+*.keystore
+key.properties
+
+
+# File hasil build dan konfigurasi lokal
+.dart_tool/
+build/
+**/local.properties
