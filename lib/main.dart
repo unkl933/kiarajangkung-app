@@ -197,6 +197,9 @@ class PhotoService {
     String telepon = '',
     String rt = '',
     String rw = '',
+    String kawil = '',
+    String wargaId = '',
+    List<String> roles = const ['warga'],
   }) async {
     return _request({
       'action': 'provisionResident',
@@ -206,6 +209,9 @@ class PhotoService {
       'telepon': telepon,
       'rt': rt,
       'rw': rw,
+      'kawil': kawil,
+      'wargaId': wargaId,
+      'roles': roles,
     });
   }
 
@@ -572,7 +578,13 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int tab = 0;
-  bool get isAdmin => widget.role.toLowerCase() == 'admin' || widget.role.toLowerCase() == 'owner';
+  bool get isAdmin {
+    final roles = (widget.profile['roles'] is List)
+        ? (widget.profile['roles'] as List).map((e) => e.toString().toLowerCase()).toSet()
+        : <String>{};
+    return widget.role.toLowerCase() == 'admin' || widget.role.toLowerCase() == 'owner' ||
+        roles.contains('admin') || roles.contains('owner');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1796,8 +1808,9 @@ List<ModuleField> fieldsForModule(String key) {
         ModuleField('pendidikan', 'Pendidikan'),
         ModuleField('pekerjaan', 'Pekerjaan'),
         ModuleField('hubunganKeluarga', 'Hubungan dalam keluarga'),
-        ModuleField('rt', 'RT'),
+        ModuleField('kawil', 'Kawil / Dusun'),
         ModuleField('rw', 'RW'),
+        ModuleField('rt', 'RT'),
       ];
     case 'perangkat':
       return const [
@@ -1926,6 +1939,17 @@ Future<void> showRecordForm(
   Map<String, dynamic>? initial,
 }) async {
   if (!isAdmin && !isChair) return;
+  final currentUid = Db.auth.currentUser?.uid;
+  final currentProfile = currentUid == null ? null : await Db.user(currentUid).get();
+  final currentData = currentProfile?.data() ?? <String, dynamic>{};
+  final currentRoles = (currentData['roles'] is List)
+      ? List<String>.from(currentData['roles'].map((e) => e.toString()))
+      : <String>[(currentData['role'] ?? 'warga').toString()];
+  final isOwner = currentRoles.map((e) => e.toLowerCase()).contains('owner');
+  final initialRoles = (initial?['roles'] is List)
+      ? List<String>.from((initial!['roles'] as List).map((e) => e.toString()))
+      : <String>['warga'];
+  final selectedRoles = <String>{...initialRoles, 'warga'};
   final title = TextEditingController(
     text: (initial?['judul'] ?? initial?['nama'] ?? initial?['nama_usaha'] ?? '').toString(),
   );
@@ -1993,6 +2017,58 @@ Future<void> showRecordForm(
                       ),
                     ),
                   )),
+                  if (module.keyName == 'sensus' && isOwner && docId == null) ...[
+                    const SizedBox(height: 8),
+                    Card(
+                      elevation: 0,
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: StatefulBuilder(
+                          builder: (roleContext, setRoleState) => Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Role warga (khusus Owner)', style: TextStyle(fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              const Text('Warga selalu memiliki role dasar Warga. Pilih jabatan tambahan bila diperlukan.', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                              ...const <MapEntry<String, String>>[
+                                MapEntry('owner', 'Owner'),
+                                MapEntry('admin', 'Admin'),
+                                MapEntry('perangkat_kawil', 'Perangkat Kawil'),
+                                MapEntry('ketua_rw', 'Ketua RW'),
+                                MapEntry('ketua_rt', 'Ketua RT'),
+                                MapEntry('petugas_sampah', 'Petugas Sampah'),
+                                MapEntry('pemilik_umkm', 'Pemilik UMKM'),
+                                MapEntry('pemilik_fasilitas', 'Pemilik Fasilitas'),
+                                MapEntry('ketua_organisasi', 'Ketua Organisasi'),
+                                MapEntry('ketua_dkm', 'Ketua DKM'),
+                              ].map((entry) => CheckboxListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                value: selectedRoles.contains(entry.key),
+                                title: Text(entry.value),
+                                onChanged: (value) => setRoleState(() {
+                                  if (value == true) {
+                                    selectedRoles.add(entry.key);
+                                  } else {
+                                    selectedRoles.remove(entry.key);
+                                  }
+                                  selectedRoles.add('warga');
+                                }),
+                              )),
+                              const Divider(),
+                              const Text('Wilayah penugasan', style: TextStyle(fontWeight: FontWeight.bold)),
+                              const Text('Isi Kawil, RW, dan RT sesuai jabatan. Ketua RT dibatasi pada RT yang dipilih; Ketua RW mencakup seluruh RT di RW tersebut.', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (module.keyName == 'sensus' && !isOwner)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 10),
+                      child: Text('Role ditetapkan oleh Owner. Admin hanya dapat memasukkan data warga dan membuat akun login.', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    ),
                   Card(
                     elevation: 0,
                     color: Colors.white,
@@ -2082,19 +2158,31 @@ Future<void> showRecordForm(
                         if (docId == null) {
                           payload['createdAt'] = FieldValue.serverTimestamp();
                           payload['createdBy'] = Db.auth.currentUser?.uid;
-                          await Db.module(module.keyName).add(payload);
+                          final savedDoc = await Db.module(module.keyName).add(payload);
                           if (module.keyName == 'sensus') {
+                            final assignedRoles = isOwner
+                                ? <String>{'warga', ...selectedRoles}.toList()
+                                : <String>['warga'];
+                            await savedDoc.update({'roles': assignedRoles, 'wargaId': savedDoc.id});
                             try {
-                              await PhotoService.provisionResident(
+                              final account = await PhotoService.provisionResident(
                                 nik: (payload['nik'] ?? '').toString().trim(),
                                 nama: title.text.trim(),
                                 tanggalLahir: (payload['tanggalLahir'] ?? '').toString().trim(),
                                 telepon: (payload['telepon'] ?? '').toString(),
                                 rt: (payload['rt'] ?? '').toString(),
                                 rw: (payload['rw'] ?? '').toString(),
+                                kawil: (payload['kawil'] ?? '').toString(),
+                                wargaId: savedDoc.id,
+                                roles: assignedRoles,
                               );
-                              if (context.mounted) showMessage(context, 'Data sensus tersimpan dan akun warga berhasil dibuat. Password awal adalah tanggal lahir DDMMYYYY; warga wajib menggantinya saat masuk pertama kali.');
+                              await savedDoc.update({
+                                'accountUid': (account['uid'] ?? '').toString(),
+                                'akunStatus': 'Aktif',
+                              });
+                              if (context.mounted) showMessage(context, 'Data sensus tersimpan dan akun warga berhasil dibuat. Role: ${assignedRoles.join(', ')}. Password awal tanggal lahir DDMMYYYY; wajib diganti saat login pertama.');
                             } catch (accountError) {
+                              await savedDoc.update({'akunStatus': 'Gagal dibuat'});
                               if (context.mounted) showMessage(context, 'Data sensus tersimpan, tetapi akun belum berhasil dibuat: $accountError');
                             }
                           }
@@ -2394,7 +2482,11 @@ class UserManagementPage extends StatelessWidget {
           future: Db.user(Db.auth.currentUser!.uid).get(),
           builder: (context, me) {
             if (!me.hasData) return const Center(child: CircularProgressIndicator());
-            final isOwner = (me.data!.data()?['role'] ?? '').toString() == 'owner';
+            final meData = me.data!.data() ?? <String, dynamic>{};
+            final meRoles = (meData['roles'] is List)
+                ? (meData['roles'] as List).map((e) => e.toString().toLowerCase()).toSet()
+                : <String>{(meData['role'] ?? '').toString().toLowerCase()};
+            final isOwner = meRoles.contains('owner');
             return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: Db.firestore.collection('users').orderBy('nama').snapshots(),
               builder: (context, snapshot) {
@@ -2405,6 +2497,9 @@ class UserManagementPage extends StatelessWidget {
                   children: snapshot.data!.docs.map((doc) {
                     final d = doc.data();
                     final role = (d['role'] ?? 'warga').toString();
+                    final roleList = (d['roles'] is List)
+                        ? (d['roles'] as List).map((e) => e.toString()).join(', ')
+                        : role;
                     final nik = (d['nik'] ?? '').toString();
                     final maskedNik = nik.length == 16
                         ? '${nik.substring(0, 4)}********${nik.substring(12)}'
@@ -2412,7 +2507,7 @@ class UserManagementPage extends StatelessWidget {
                     return Card(
                       child: ListTile(
                         title: Text((d['nama'] ?? 'Tanpa nama').toString()),
-                        subtitle: Text('$maskedNik\nPeran: $role • Status: ${(d['status'] ?? 'Aktif')}'),
+                        subtitle: Text('$maskedNik\nRole: $roleList • Status: ${(d['status'] ?? 'Aktif')}'),
                         isThreeLine: true,
                         trailing: isOwner && role != 'owner'
                             ? PopupMenuButton<String>(
@@ -2420,6 +2515,7 @@ class UserManagementPage extends StatelessWidget {
                                   try {
                                     await doc.reference.update({
                                       'role': value,
+                                      'roles': value == 'warga' ? ['warga'] : ['warga', value],
                                       'updatedAt': FieldValue.serverTimestamp(),
                                     });
                                     if (context.mounted) showMessage(context, 'Peran akun diperbarui menjadi $value.');
