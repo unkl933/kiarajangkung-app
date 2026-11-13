@@ -890,10 +890,14 @@ String _whatsappNumber(String value) {
 
 Future<void> _openPhone(BuildContext context, String phone) async {
   if (phone.trim().isEmpty) return;
-  final uri = Uri(scheme: 'tel', path: _cleanPhone(phone));
-  if (await canLaunchUrl(uri)) {
-    await launchUrl(uri);
-  } else if (context.mounted) {
+  final number = _cleanPhone(phone);
+  if (number.isEmpty) {
+    showMessage(context, 'Nomor telepon belum valid.');
+    return;
+  }
+  final uri = Uri(scheme: 'tel', path: number);
+  final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!opened && context.mounted) {
     showMessage(context, 'Tidak dapat membuka aplikasi telepon.');
   }
 }
@@ -950,6 +954,15 @@ class DashboardEmergencyPreview extends StatelessWidget {
             TextButton.icon(onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call), label: const Text('Telepon')),
           if (phone.isNotEmpty)
             FilledButton.icon(onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat), label: const Text('WhatsApp')),
+          if ((data['lokasiMaps'] ?? data['googleMaps'] ?? data['alamat'] ?? '').toString().trim().isNotEmpty)
+            TextButton.icon(
+              onPressed: () => openGoogleMaps(
+                context,
+                (data['lokasiMaps'] ?? data['googleMaps'] ?? data['alamat']).toString(),
+              ),
+              icon: const Icon(Icons.location_on_outlined),
+              label: const Text('Buka Lokasi'),
+            ),
         ],
       ),
     );
@@ -2955,7 +2968,6 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
       child: Padding(
         padding: const EdgeInsets.all(22),
         child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             Builder(builder: (context) {
               final photo = (data['fotoUrl'] ?? data['foto'] ?? data['imageUrl'] ?? '').toString().trim();
@@ -2980,13 +2992,18 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
             if (phone.isNotEmpty) ...[
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.call, color: Color(0xFF21865D)),
+                leading: const Icon(Icons.call, color: Colors.green),
                 title: const Text('Telepon kontak ini'),
                 subtitle: Text(phone),
                 onTap: () async {
                   final dialNumber = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+                  if (dialNumber.isEmpty) {
+                    showMessage(sheetContext, 'Nomor telepon belum valid.');
+                    return;
+                  }
                   final dialUri = Uri(scheme: 'tel', path: dialNumber);
-                  if (!await launchUrl(dialUri, mode: LaunchMode.externalApplication) && sheetContext.mounted) {
+                  final opened = await launchUrl(dialUri, mode: LaunchMode.externalApplication);
+                  if (!opened && sheetContext.mounted) {
                     showMessage(sheetContext, 'Tidak dapat membuka aplikasi telepon.');
                   }
                 },
