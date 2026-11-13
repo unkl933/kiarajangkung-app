@@ -1,8 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -57,6 +62,92 @@ class Db {
       firestore.collection('kampung').doc('kiarajangkung').collection(key);
   static DocumentReference<Map<String, dynamic>> user(String uid) =>
       firestore.collection('users').doc(uid);
+}
+
+class PhotoService {
+  static const int maxBytes = 1024 * 1024; // maksimal 1 MB
+  // Ganti setelah Web App Google Apps Script selesai di-deploy.
+  static const String driveApiUrl =
+      'https://script.google.com/macros/s/AKfycbwUtml4Yb4wsKePvzZNmk4ifyCxjb88hcOdhwfjfZqqddevgqUWs_3B0oX5MLmLt8w/exec';
+  static final picker = ImagePicker();
+
+  static Future<Uint8List> pickAndCompress() async {
+    final picked = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1280,
+      maxHeight: 1280,
+      imageQuality: 78,
+    );
+    if (picked == null) throw Exception('Pemilihan foto dibatalkan.');
+    final original = await picked.readAsBytes();
+    Uint8List result = original;
+    for (final quality in [78, 68, 58, 48, 38, 28]) {
+      result = await FlutterImageCompress.compressWithList(
+        original,
+        minWidth: 1280,
+        minHeight: 1280,
+        quality: quality,
+        format: CompressFormat.jpeg,
+      );
+      if (result.lengthInBytes <= maxBytes) break;
+    }
+    if (result.lengthInBytes > maxBytes) {
+      throw Exception('Ukuran foto masih lebih dari 1 MB. Pilih foto lain.');
+    }
+    return result;
+  }
+
+  static Future<Map<String, dynamic>> _request(Map<String, dynamic> body) async {
+    if (driveApiUrl.contains('ISI_DEPLOYMENT_ID')) {
+      throw Exception('URL Google Drive belum dipasang di main.dart.');
+    }
+    final user = Db.auth.currentUser;
+    if (user == null) throw Exception('Silakan login kembali.');
+    final token = await user.getIdToken(true);
+    final request = await HttpClient().postUrl(Uri.parse(driveApiUrl));
+    request.headers.contentType = ContentType.json;
+    request.write(jsonEncode({
+      ...body,
+      'idToken': token,
+      'apiKey': Firebase.app().options.apiKey,
+      'projectId': Firebase.app().options.projectId,
+    }));
+    final response = await request.close();
+    final responseText = await response.transform(utf8.decoder).join();
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Server Google Drive (${response.statusCode}): $responseText');
+    }
+    final decoded = jsonDecode(responseText);
+    if (decoded is! Map<String, dynamic> || decoded['ok'] != true) {
+      throw Exception(decoded is Map ? (decoded['error'] ?? 'Gagal memproses foto') : 'Respons Google Drive tidak valid.');
+    }
+    return decoded;
+  }
+
+  static Future<String> upload(Uint8List bytes, String moduleKey) async {
+    if (bytes.lengthInBytes > maxBytes) throw Exception('Foto melebihi batas 1 MB.');
+    final result = await _request({
+      'action': 'upload',
+      'module': moduleKey,
+      'fileName': '${DateTime.now().millisecondsSinceEpoch}.jpg',
+      'mimeType': 'image/jpeg',
+      'base64': base64Encode(bytes),
+    });
+    return (result['imageUrl'] ?? '').toString();
+  }
+
+  static Future<void> deleteIfOwned(String? url) async {
+    if (url == null || url.trim().isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    final fileId = uri.queryParameters['id'];
+    if (fileId == null || fileId.isEmpty || !uri.host.contains('drive.google.com')) return;
+    try {
+      await _request({'action': 'delete', 'fileId': fileId});
+    } catch (_) {
+      // Kegagalan menghapus foto lama tidak membatalkan penghapusan data utama.
+    }
+  }
 }
 
 class AuthGate extends StatelessWidget {
@@ -741,29 +832,56 @@ class ModulePage extends StatelessWidget {
               final data = doc.data();
               final title = (data['judul'] ?? data['nama'] ?? data['nama_usaha'] ?? data['nama_lengkap'] ?? 'Data kampung').toString();
               final desc = (data['deskripsi'] ?? data['keterangan'] ?? data['alamat'] ?? '').toString();
+              final photo = (data['fotoUrl'] ?? data['foto'] ?? data['imageUrl'] ?? '').toString().trim();
               return Card(
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: desc.isEmpty ? null : Padding(
-                    padding: const EdgeInsets.only(top: 5),
-                    child: Text(desc, maxLines: 3, overflow: TextOverflow.ellipsis),
-                  ),
-                  trailing: canEdit ? PopupMenuButton<String>(
-                    onSelected: (v) async {
-                      if (v == 'edit') {
-                        showRecordForm(context, module, isAdmin: canEdit, docId: doc.id, initial: data);
-                      } else if (v == 'delete') {
-                        final yes = await confirmDelete(context);
-                        if (yes == true) await doc.reference.delete();
-                      }
-                    },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'edit', child: Text('Edit')),
-                      PopupMenuItem(value: 'delete', child: Text('Hapus')),
-                    ],
-                  ) : const Icon(Icons.chevron_right),
+                clipBehavior: Clip.antiAlias,
+                margin: const EdgeInsets.only(bottom: 14),
+                child: InkWell(
                   onTap: () => showRecordDetail(context, title, data),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    SizedBox(
+                      height: 174,
+                      width: double.infinity,
+                      child: photo.isEmpty
+                          ? _photoPlaceholder()
+                          : Image.network(photo, fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => _photoPlaceholder()),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(15, 12, 8, 14),
+                      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          if ((data['kategori'] ?? data['jenisFasilitas'] ?? data['jenisUsaha'] ?? '').toString().trim().isNotEmpty)
+                            Padding(padding: const EdgeInsets.only(top: 4), child: Text(
+                              (data['kategori'] ?? data['jenisFasilitas'] ?? data['jenisUsaha']).toString(),
+                              style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 12, fontWeight: FontWeight.w600))),
+                          if (desc.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text(
+                            desc, maxLines: 2, overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: Colors.grey.shade700, height: 1.3))),
+                          const SizedBox(height: 7),
+                          Text('Lihat detail  ›', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 12, fontWeight: FontWeight.w600)),
+                        ])),
+                        if (canEdit) PopupMenuButton<String>(
+                          onSelected: (v) async {
+                            if (v == 'edit') {
+                              showRecordForm(context, module, isAdmin: canEdit, docId: doc.id, initial: data);
+                            } else if (v == 'delete') {
+                              final yes = await confirmDelete(context);
+                              if (yes == true) {
+                                await PhotoService.deleteIfOwned(photo);
+                                await doc.reference.delete();
+                              }
+                            }
+                          },
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(value: 'edit', child: Text('Edit')),
+                            PopupMenuItem(value: 'delete', child: Text('Hapus')),
+                          ],
+                        ) else const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.arrow_forward_ios, size: 16)),
+                      ]),
+                    ),
+                  ]),
                 ),
               );
             },
@@ -774,6 +892,16 @@ class ModulePage extends StatelessWidget {
   }
 }
 
+
+Widget _photoPlaceholder() => Container(
+  color: const Color(0xFFE8F1EC),
+  alignment: Alignment.center,
+  child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+    Icon(Icons.image_outlined, size: 42, color: Color(0xFF6B9B82)),
+    SizedBox(height: 6),
+    Text('Belum ada foto', style: TextStyle(color: Color(0xFF6B9B82))),
+  ]),
+);
 
 class ModuleField {
   final String key;
@@ -953,6 +1081,11 @@ Future<void> showRecordForm(
       field.key: TextEditingController(text: (initial?[field.key] ?? '').toString()),
   };
   final formKey = GlobalKey<FormState>();
+  final photoController = TextEditingController(
+    text: (initial?['fotoUrl'] ?? initial?['foto'] ?? initial?['imageUrl'] ?? '').toString(),
+  );
+  Uint8List? selectedPhoto;
+  bool uploadingPhoto = false;
   await showModalBottomSheet(
     context: context,
     isScrollControlled: true,
@@ -990,7 +1123,7 @@ Future<void> showRecordForm(
                     ),
                   ),
                   const SizedBox(height: 10),
-                  ...definitions.map((field) => Padding(
+                  ...definitions.where((field) => field.key != 'fotoUrl').map((field) => Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: TextFormField(
                       controller: controllers[field.key],
@@ -1006,6 +1139,56 @@ Future<void> showRecordForm(
                       ),
                     ),
                   )),
+                  Card(
+                    elevation: 0,
+                    color: Colors.white,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const Text('Foto / Gambar', style: TextStyle(fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 4),
+                        Text('Maksimal 1 MB. Foto akan dikompres otomatis.', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                        const SizedBox(height: 10),
+                        if (selectedPhoto != null)
+                          ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.memory(selectedPhoto!, height: 150, width: double.infinity, fit: BoxFit.cover))
+                        else if (photoController.text.trim().isNotEmpty)
+                          ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(photoController.text.trim(), height: 150, width: double.infinity, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => SizedBox(height: 90, child: _photoPlaceholder())))
+                        else
+                          SizedBox(height: 90, child: _photoPlaceholder()),
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: uploadingPhoto ? null : () async {
+                            try {
+                              final bytes = await PhotoService.pickAndCompress();
+                              setSheetState(() { selectedPhoto = bytes; });
+                              if (sheetContext.mounted) showMessage(sheetContext, 'Foto siap diunggah (${(bytes.lengthInBytes / 1024).toStringAsFixed(0)} KB).');
+                            } catch (e) {
+                              if (sheetContext.mounted && !e.toString().contains('dibatalkan')) showMessage(sheetContext, '$e');
+                            }
+                          },
+                          icon: const Icon(Icons.photo_library_outlined),
+                          label: const Text('Pilih foto dari galeri'),
+                        ),
+                        TextFormField(
+                          controller: photoController,
+                          keyboardType: TextInputType.url,
+                          decoration: const InputDecoration(
+                            labelText: 'Atau URL foto (opsional)',
+                            hintText: 'https://alamat-gambar.jpg',
+                            prefixIcon: Icon(Icons.link),
+                          ),
+                          onChanged: (_) => setSheetState(() { selectedPhoto = null; }),
+                        ),
+                        if (selectedPhoto != null || photoController.text.trim().isNotEmpty)
+                          Align(alignment: Alignment.centerRight, child: TextButton.icon(
+                            onPressed: () => setSheetState(() { selectedPhoto = null; photoController.clear(); }),
+                            icon: const Icon(Icons.delete_outline), label: const Text('Hapus pilihan foto')),
+                          ),
+                      ]),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   if (module.keyName == 'pengumuman')
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
@@ -1017,15 +1200,24 @@ Future<void> showRecordForm(
                     ),
                   const SizedBox(height: 10),
                   FilledButton(
-                    onPressed: () async {
+                    onPressed: uploadingPhoto ? null : () async {
                       if (!formKey.currentState!.validate()) return;
+                      setSheetState(() { uploadingPhoto = true; });
+                      String? newlyUploadedPhotoUrl;
+                      try {
+                        String finalPhotoUrl = photoController.text.trim();
+                        if (selectedPhoto != null) {
+                          finalPhotoUrl = await PhotoService.upload(selectedPhoto!, module.keyName);
+                          newlyUploadedPhotoUrl = finalPhotoUrl;
+                        }
                       final payload = <String, dynamic>{
                         'judul': title.text.trim(),
                         'nama': title.text.trim(),
                         ...{
-                          for (final field in definitions)
+                          for (final field in definitions.where((field) => field.key != 'fotoUrl'))
                             field.key: controllers[field.key]!.text.trim(),
                         },
+                        'fotoUrl': finalPhotoUrl,
                         'updatedAt': FieldValue.serverTimestamp(),
                         'updatedBy': Db.auth.currentUser?.uid,
                       };
@@ -1033,18 +1225,26 @@ Future<void> showRecordForm(
                       // sudah ada tetap dapat membaca data dengan format sebelumnya.
                       payload['deskripsi'] ??= '';
                       payload['keterangan'] ??= payload['deskripsi'];
-                      try {
                         if (docId == null) {
                           payload['createdAt'] = FieldValue.serverTimestamp();
                           payload['createdBy'] = Db.auth.currentUser?.uid;
                           await Db.module(module.keyName).add(payload);
                         } else {
                           await Db.module(module.keyName).doc(docId).update(payload);
+                          final oldPhoto = (initial?['fotoUrl'] ?? initial?['foto'] ?? initial?['imageUrl'] ?? '').toString();
+                          if (oldPhoto.isNotEmpty && oldPhoto != finalPhotoUrl) {
+                            await PhotoService.deleteIfOwned(oldPhoto);
+                          }
                         }
                         if (sheetContext.mounted) Navigator.pop(sheetContext);
                         if (context.mounted) showMessage(context, 'Data berhasil disimpan.');
                       } catch (e) {
+                        if (newlyUploadedPhotoUrl != null) {
+                          await PhotoService.deleteIfOwned(newlyUploadedPhotoUrl);
+                        }
                         if (context.mounted) showMessage(context, 'Gagal menyimpan: $e');
+                      } finally {
+                        if (sheetContext.mounted) setSheetState(() { uploadingPhoto = false; });
                       }
                     },
                     child: const Text('Simpan data'),
@@ -1058,6 +1258,7 @@ Future<void> showRecordForm(
     ),
   );
   title.dispose();
+  photoController.dispose();
   for (final controller in controllers.values) {
     controller.dispose();
   }
@@ -1353,6 +1554,15 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
         padding: const EdgeInsets.all(22),
         child: SingleChildScrollView(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            Builder(builder: (context) {
+              final photo = (data['fotoUrl'] ?? data['foto'] ?? data['imageUrl'] ?? '').toString().trim();
+              if (photo.isEmpty) return const SizedBox.shrink();
+              return Padding(padding: const EdgeInsets.only(bottom: 16), child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Image.network(photo, width: double.infinity, height: 220, fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => SizedBox(height: 120, child: _photoPlaceholder())),
+              ));
+            }),
             Text(title, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 14),
             if (phone.isNotEmpty)
@@ -1373,7 +1583,7 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
               ),
             const Divider(),
             ...data.entries.where((e) => !excluded.contains(e.key) &&
-                !{'telepon', 'whatsapp', 'lokasiMaps', 'googleMaps'}.contains(e.key)).map((e) => Padding(
+                !{'telepon', 'whatsapp', 'lokasiMaps', 'googleMaps', 'fotoUrl', 'foto', 'imageUrl'}.contains(e.key)).map((e) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(e.key.replaceAll('_', ' ').toUpperCase(), style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
