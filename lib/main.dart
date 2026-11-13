@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' show FontFeature;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -652,7 +653,7 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
       children: [
         Container(
-          padding: const EdgeInsets.all(22),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               begin: Alignment.topLeft,
@@ -675,19 +676,19 @@ class _HomePageState extends State<HomePage> {
                   style: TextStyle(color: Colors.white, fontSize: 11,
                     fontWeight: FontWeight.w800, letterSpacing: .6))),
               ]),
-              const SizedBox(height: 20),
+              const SizedBox(height: 10),
               const Text('Wilujeng sumping 👋',
-                style: TextStyle(color: Colors.white70, fontSize: 14)),
+                style: TextStyle(color: Colors.white70, fontSize: 12)),
               const SizedBox(height: 4),
               Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: Colors.white,
-                  fontSize: 25, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 7),
+                  fontSize: 21, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
               const Text('Kampung Digital Kiarajangkung',
                 style: TextStyle(color: Colors.white, fontSize: 14)),
-              const SizedBox(height: 15),
+              const SizedBox(height: 8),
               Container(height: 1, color: Colors.white24),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               const Text('BERSAMA MEMBANGUN DESA, MEWUJUDKAN MASYARAKAT SEJAHTERA',
                 style: TextStyle(color: Colors.white, fontSize: 10,
                   height: 1.4, fontWeight: FontWeight.w700, letterSpacing: .35)),
@@ -724,7 +725,11 @@ class _HomePageState extends State<HomePage> {
               color: const Color(0xFFB36A38), onTap: () => openModule('pengumuman')),
           ],
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
+        DashboardPopulationStats(isAdmin: isAdmin),
+        const SizedBox(height: 16),
+        const DashboardClock(),
+        const SizedBox(height: 10),
         const DashboardPrayerSchedule(),
         const SizedBox(height: 18),
         const DashboardEmergencyPreview(),
@@ -857,43 +862,104 @@ class _DashboardPrayerScheduleState extends State<DashboardPrayerSchedule> {
   );
 }
 
+String _cleanPhone(String raw) => raw.replaceAll(RegExp(r'[^0-9+]'), '');
+
+String _whatsAppNumber(String raw) {
+  var n = raw.replaceAll(RegExp(r'[^0-9]'), '');
+  if (n.startsWith('0')) n = '62${n.substring(1)}';
+  if (n.startsWith('8')) n = '62$n';
+  if (n.startsWith('620')) n = '62${n.substring(3)}';
+  return n;
+}
+
+Future<void> _dialNumber(BuildContext context, String raw) async {
+  final phone = _cleanPhone(raw);
+  if (phone.isEmpty) { showMessage(context, 'Nomor telepon belum tersedia.'); return; }
+  final uri = Uri(scheme: 'tel', path: phone);
+  try {
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) showMessage(context, 'Aplikasi telepon tidak dapat dibuka.');
+  } catch (_) {
+    if (context.mounted) showMessage(context, 'Aplikasi telepon tidak dapat dibuka.');
+  }
+}
+
+Future<void> _openWhatsApp(BuildContext context, String raw) async {
+  final phone = _whatsAppNumber(raw);
+  if (phone.isEmpty) { showMessage(context, 'Nomor WhatsApp belum tersedia.'); return; }
+  final uri = Uri.parse('https://wa.me/$phone');
+  try {
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && context.mounted) showMessage(context, 'WhatsApp tidak dapat dibuka.');
+  } catch (_) {
+    if (context.mounted) showMessage(context, 'WhatsApp tidak dapat dibuka.');
+  }
+}
+
+void _showContactDetails(BuildContext context, Map<String, dynamic> data, {required bool health}) {
+  final title = (data['judul'] ?? data['nama'] ?? data['kategori'] ?? data['jenisFasilitas'] ?? (health ? 'Fasilitas kesehatan' : 'Kontak darurat')).toString();
+  final phone = (data['telepon'] ?? '').toString();
+  final address = (data['alamat'] ?? '').toString();
+  final description = (data['catatan'] ?? data['layanan'] ?? data['deskripsi'] ?? '').toString();
+  final hours = (data['jamBuka'] ?? '').toString();
+  final maps = (data['lokasiMaps'] ?? '').toString();
+  showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
+    title: Text(title),
+    content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (address.isNotEmpty) _detailLine(Icons.location_on_outlined, address),
+      if (phone.isNotEmpty) _detailLine(Icons.phone_outlined, phone),
+      if (hours.isNotEmpty) _detailLine(Icons.access_time, hours),
+      if (description.isNotEmpty) _detailLine(Icons.info_outline, description),
+      if (maps.isNotEmpty) _detailLine(Icons.map_outlined, 'Lokasi tersedia di Google Maps'),
+    ])),
+    actions: [
+      if (maps.isNotEmpty) TextButton.icon(onPressed: () async {
+        final uri = Uri.tryParse(maps) ?? Uri.https('www.google.com', '/maps/search/', {'api': '1', 'query': address});
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }, icon: const Icon(Icons.map_outlined), label: const Text('Peta')),
+      if (phone.isNotEmpty) TextButton.icon(onPressed: () => _dialNumber(context, phone), icon: const Icon(Icons.call), label: const Text('Telepon')),
+      if (phone.isNotEmpty) FilledButton.icon(onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat), label: const Text('WhatsApp')),
+    ],
+  ));
+}
+
+Widget _detailLine(IconData icon, String text) => Padding(
+  padding: const EdgeInsets.only(bottom: 10),
+  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(icon, size: 18, color: const Color(0xFF21865D)), const SizedBox(width: 9), Expanded(child: Text(text))]),
+);
+
 class DashboardEmergencyPreview extends StatelessWidget {
   const DashboardEmergencyPreview({super.key});
-
   @override
   Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-    stream: Db.module('kontak_darurat').limit(3).snapshots(),
+    stream: Db.module('kontak_darurat').snapshots(),
     builder: (context, snapshot) {
       if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
       final docs = snapshot.data!.docs;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const _DashboardSectionTitle(title: 'Kontak Darurat'),
-        ...docs.map((doc) {
-          final d = doc.data();
-          final title = (d['judul'] ?? d['nama'] ?? d['kategori'] ?? 'Layanan darurat').toString();
-          final phone = (d['telepon'] ?? '').toString().trim();
-          return Card(
-            margin: const EdgeInsets.only(bottom: 7),
-            child: ListTile(
-              leading: const CircleAvatar(backgroundColor: Color(0xFFFFE8E6),
-                child: Icon(Icons.phone_in_talk, color: Color(0xFFD94B45))),
-              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(phone.isEmpty ? 'Nomor belum tersedia' : phone),
-              trailing: phone.isEmpty ? null : IconButton(
-                tooltip: 'Telepon',
-                icon: const Icon(Icons.call, color: Color(0xFF21865D)),
-                onPressed: () async {
-                  final uri = Uri(scheme: 'tel', path: phone.replaceAll(RegExp(r'[^0-9+]'), ''));
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri);
-                  } else if (context.mounted) {
-                    showMessage(context, 'Tidak dapat membuka aplikasi telepon.');
-                  }
-                },
-              ),
-            ),
-          );
-        }),
+        SizedBox(height: 150, child: ListView.separated(
+          scrollDirection: Axis.horizontal, itemCount: docs.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (context, i) {
+            final d = docs[i].data();
+            final title = (d['judul'] ?? d['nama'] ?? d['kategori'] ?? 'Layanan darurat').toString();
+            final phone = (d['telepon'] ?? '').toString();
+            return SizedBox(width: 245, child: Card(child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: () => _showContactDetails(context, d, health: false),
+              child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [const CircleAvatar(backgroundColor: Color(0xFFFFE8E6), child: Icon(Icons.emergency, color: Color(0xFFD94B45))), const SizedBox(width: 9), Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700))) ]),
+                const Spacer(), Text(phone.isEmpty ? 'Nomor belum tersedia' : phone, style: const TextStyle(fontSize: 12)),
+                const SizedBox(height: 5), Row(children: [
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'Telepon', onPressed: () => _dialNumber(context, phone), icon: const Icon(Icons.call, color: Color(0xFF21865D))),
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'WhatsApp', onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat, color: Color(0xFF21865D))),
+                  const Spacer(), const Text('Detail', style: TextStyle(fontSize: 11, color: Color(0xFF21865D))),
+                ]),
+              ])),
+            )));
+          },
+        )),
       ]);
     },
   );
@@ -901,34 +967,137 @@ class DashboardEmergencyPreview extends StatelessWidget {
 
 class DashboardHealthPreview extends StatelessWidget {
   const DashboardHealthPreview({super.key});
-
   @override
   Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-    stream: Db.module('fasilitas_kesehatan').limit(2).snapshots(),
+    stream: Db.module('fasilitas_kesehatan').snapshots(),
     builder: (context, snapshot) {
       if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
+      final docs = snapshot.data!.docs;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const _DashboardSectionTitle(title: 'Fasilitas Kesehatan'),
-        ...snapshot.data!.docs.map((doc) {
-          final d = doc.data();
-          final title = (d['judul'] ?? d['nama'] ?? d['jenisFasilitas'] ?? 'Fasilitas kesehatan').toString();
-          final address = (d['alamat'] ?? '').toString();
-          final hours = (d['jamBuka'] ?? '').toString();
-          return Card(
-            margin: const EdgeInsets.only(bottom: 7),
-            child: ListTile(
-              leading: const CircleAvatar(backgroundColor: Color(0xFFE4F3EB),
-                child: Icon(Icons.health_and_safety, color: Color(0xFF21865D))),
-              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text([address, hours].where((v) => v.trim().isNotEmpty).join(' • '),
-                maxLines: 2, overflow: TextOverflow.ellipsis),
-            ),
-          );
-        }),
+        SizedBox(height: 166, child: ListView.separated(
+          scrollDirection: Axis.horizontal, itemCount: docs.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (context, i) {
+            final d = docs[i].data();
+            final title = (d['judul'] ?? d['nama'] ?? d['jenisFasilitas'] ?? 'Fasilitas kesehatan').toString();
+            final address = (d['alamat'] ?? '').toString();
+            final phone = (d['telepon'] ?? '').toString();
+            return SizedBox(width: 255, child: Card(child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: () => _showContactDetails(context, d, health: true),
+              child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [const CircleAvatar(backgroundColor: Color(0xFFE4F3EB), child: Icon(Icons.health_and_safety, color: Color(0xFF21865D))), const SizedBox(width: 9), Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)))]),
+                const SizedBox(height: 8), Expanded(child: Text(address.isEmpty ? 'Alamat belum tersedia' : address, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11))),
+                Row(children: [
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'Telepon', onPressed: () => _dialNumber(context, phone), icon: const Icon(Icons.call, color: Color(0xFF21865D))),
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'WhatsApp', onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat, color: Color(0xFF21865D))),
+                  const Spacer(), const Text('Detail', style: TextStyle(fontSize: 11, color: Color(0xFF21865D))),
+                ]),
+              ])),
+            )));
+          },
+        )),
       ]);
     },
   );
 }
+
+class DashboardClock extends StatefulWidget {
+  const DashboardClock({super.key});
+  @override
+  State<DashboardClock> createState() => _DashboardClockState();
+}
+class _DashboardClockState extends State<DashboardClock> {
+  late DateTime now;
+  Timer? timer;
+  static const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  static const days = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'];
+  @override
+  void initState() { super.initState(); now = DateTime.now().toUtc().add(const Duration(hours: 7)); timer = Timer.periodic(const Duration(seconds: 1), (_) { if (mounted) setState(() => now = DateTime.now().toUtc().add(const Duration(hours: 7))); }); }
+  @override
+  void dispose() { timer?.cancel(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    final date = '${days[now.weekday - 1]}, ${now.day} ${months[now.month - 1]} ${now.year}';
+    final time = '${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}:${now.second.toString().padLeft(2,'0')}';
+    return Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFE4ECE6))), child: Row(children: [
+      const Icon(Icons.access_time_filled, color: Color(0xFF167C55), size: 28), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(date, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)), const Text('Waktu Indonesia Barat (WIB)', style: TextStyle(fontSize: 10, color: Colors.black54))])), Text(time, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
+    ]));
+  }
+}
+
+class DashboardPopulationStats extends StatefulWidget {
+  final bool isAdmin;
+  const DashboardPopulationStats({super.key, required this.isAdmin});
+  @override
+  State<DashboardPopulationStats> createState() => _DashboardPopulationStatsState();
+}
+class _DashboardPopulationStatsState extends State<DashboardPopulationStats> {
+  String? _lastPublished;
+  DocumentReference<Map<String, dynamic>> get _summaryRef => Db.module('statistik_penduduk').doc('ringkasan');
+
+  Widget _renderStats(BuildContext context, int total, int male, int female, int kk) {
+    final malePct = total == 0 ? 0.0 : male / total;
+    final femalePct = total == 0 ? 0.0 : female / total;
+    return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Statistik Penduduk', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+      const SizedBox(height: 4), const Text('Diperbarui otomatis dari Data Sensus Penduduk', style: TextStyle(fontSize: 10, color: Colors.black54)),
+      const SizedBox(height: 12), Row(children: [
+        Expanded(child: _populationRing('Laki-laki', male, malePct, const Color(0xFF3979B9))),
+        Expanded(child: _populationRing('Perempuan', female, femalePct, const Color(0xFFD66A91))),
+      ]),
+      const Divider(height: 20), Row(children: [
+        Expanded(child: _populationNumber('Total penduduk', total, Icons.groups_outlined)),
+        Expanded(child: _populationNumber('Total KK', kk, Icons.home_work_outlined)),
+      ]),
+      Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () => showDialog<void>(context: context, builder: (ctx) => AlertDialog(title: const Text('Rincian Penduduk'), content: Text('Total penduduk: $total jiwa\nLaki-laki: $male jiwa (${(malePct * 100).toStringAsFixed(1)}%)\nPerempuan: $female jiwa (${(femalePct * 100).toStringAsFixed(1)}%)\nTotal kepala keluarga: $kk KK'), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Tutup'))])), child: const Text('Lihat rincian'))),
+    ])));
+  }
+
+  Map<String, int> _count(Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    final list = docs.toList();
+    final male = list.where((d) => ['laki-laki','laki laki','l','pria'].contains((d.data()['jenisKelamin'] ?? '').toString().trim().toLowerCase())).length;
+    final female = list.where((d) => ['perempuan','wanita','p'].contains((d.data()['jenisKelamin'] ?? '').toString().trim().toLowerCase())).length;
+    final kk = list.map((d) => (d.data()['noKK'] ?? '').toString().trim()).where((v) => v.isNotEmpty).toSet().length;
+    return {'total': list.length, 'male': male, 'female': female, 'kk': kk};
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.isAdmin) {
+      return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: Db.module('sensus').snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) return const SizedBox.shrink();
+          if (!snapshot.hasData) return const Center(child: Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator()));
+          final counts = _count(snapshot.data!.docs);
+          final signature = '${counts['total']}:${counts['male']}:${counts['female']}:${counts['kk']}';
+          if (_lastPublished != signature) {
+            _lastPublished = signature;
+            Future.microtask(() => _summaryRef.set({...counts, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true)));
+          }
+          return _renderStats(context, counts['total']!, counts['male']!, counts['female']!, counts['kk']!);
+        },
+      );
+    }
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _summaryRef.snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || !snapshot.data!.exists) return const SizedBox.shrink();
+        final d = snapshot.data!.data()!;
+        return _renderStats(context, (d['total'] as num?)?.toInt() ?? 0, (d['male'] as num?)?.toInt() ?? 0, (d['female'] as num?)?.toInt() ?? 0, (d['kk'] as num?)?.toInt() ?? 0);
+      },
+    );
+  }
+}
+Widget _populationRing(String label, int count, double pct, Color color) => Column(children: [
+  SizedBox(width: 82, height: 82, child: Stack(alignment: Alignment.center, children: [
+    SizedBox.expand(child: CircularProgressIndicator(value: pct, strokeWidth: 8, backgroundColor: color.withOpacity(.13), valueColor: AlwaysStoppedAnimation<Color>(color))),
+    Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text('${(pct * 100).toStringAsFixed(1)}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)), Text('$count jiwa', style: const TextStyle(fontSize: 9))]),
+  ])), const SizedBox(height: 6), Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+]);
+Widget _populationNumber(String label, int count, IconData icon) => Row(children: [Icon(icon, color: const Color(0xFF21865D)), const SizedBox(width: 7), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('$count', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)), Text(label, style: const TextStyle(fontSize: 10, color: Colors.black54))]))]);
 
 class RondaSchedulePage extends StatefulWidget {
   final bool isAdmin;
