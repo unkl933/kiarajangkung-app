@@ -620,6 +620,20 @@ class _HomePageState extends State<HomePage> {
     ));
   }
 
+  void _showPrayerInfo(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => const SafeArea(
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: SingleChildScrollView(child: DashboardPrayerSchedule()),
+        ),
+      ),
+    );
+  }
+
   Widget dashboard() {
     final name = (widget.profile['nama'] ?? 'Warga').toString();
     return ListView(
@@ -932,7 +946,42 @@ class _RondaSchedulePageState extends State<RondaSchedulePage> {
         return ListView(padding: const EdgeInsets.all(16), children: [
           Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: const Color(0xFFEAF4ED), borderRadius: BorderRadius.circular(16)), child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Jadwal Piket Keamanan Lingkungan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)), SizedBox(height: 5), Text('Pilih hari untuk melihat petugas dan mengisi kehadiran ronda.') ])),
           const SizedBox(height: 14),
-          GridView.count(shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisCount: 4, childAspectRatio: 1.45, mainAxisSpacing: 8, crossAxisSpacing: 8, children: List.generate(7, (i) => InkWell(onTap: () => setState(() { selectedDay = i; final delta = i - (selectedDate.weekday - 1); selectedDate = selectedDate.add(Duration(days: delta)); }), borderRadius: BorderRadius.circular(12), child: Container(decoration: BoxDecoration(color: selectedDay == i ? const Color(0xFF167C55) : Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: selectedDay == i ? const Color(0xFF167C55) : const Color(0xFFDCE5DE))), alignment: Alignment.center, child: Text(days[i], style: TextStyle(fontWeight: FontWeight.w700, color: selectedDay == i ? Colors.white : Colors.black87))))),
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 4,
+            childAspectRatio: 1.45,
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            children: List.generate(7, (i) {
+              final isSelected = selectedDay == i;
+              return InkWell(
+                onTap: () => setState(() {
+                  selectedDay = i;
+                  final delta = i - (selectedDate.weekday - 1);
+                  selectedDate = selectedDate.add(Duration(days: delta));
+                }),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: isSelected ? const Color(0xFF167C55) : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isSelected ? const Color(0xFF167C55) : const Color(0xFFDCE5DE),
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    days[i],
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: isSelected ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
           const SizedBox(height: 16),
           Row(children: [Expanded(child: Text('$dayName, ${selectedDate.day}-${selectedDate.month}-${selectedDate.year}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold))), IconButton(onPressed: () => setState(() { selectedDate = selectedDate.subtract(const Duration(days: 7)); }), icon: const Icon(Icons.chevron_left)), IconButton(onPressed: () => setState(() { selectedDate = selectedDate.add(const Duration(days: 7)); }), icon: const Icon(Icons.chevron_right))]),
           if (selected.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('Belum ada petugas yang dijadwalkan pada hari ini.'))),
