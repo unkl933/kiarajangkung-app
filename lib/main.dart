@@ -878,39 +878,106 @@ class _DashboardPrayerScheduleState extends State<DashboardPrayerSchedule> {
   );
 }
 
+
+String _cleanPhone(String value) => value.replaceAll(RegExp(r'[^0-9+]'), '');
+
+String _whatsappNumber(String value) {
+  var number = value.replaceAll(RegExp(r'[^0-9]'), '');
+  if (number.startsWith('0')) number = '62${number.substring(1)}';
+  if (number.startsWith('8')) number = '62$number';
+  return number;
+}
+
+Future<void> _openPhone(BuildContext context, String phone) async {
+  if (phone.trim().isEmpty) return;
+  final uri = Uri(scheme: 'tel', path: _cleanPhone(phone));
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri);
+  } else if (context.mounted) {
+    showMessage(context, 'Tidak dapat membuka aplikasi telepon.');
+  }
+}
+
+Future<void> _openWhatsApp(BuildContext context, String phone) async {
+  final number = _whatsappNumber(phone);
+  if (number.isEmpty) return;
+  final uri = Uri.parse('https://wa.me/$number');
+  if (await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } else if (context.mounted) {
+    showMessage(context, 'Tidak dapat membuka WhatsApp.');
+  }
+}
+
+Future<void> _openHealthMap(BuildContext context, Map<String, dynamic> data) async {
+  final link = (data['lokasiMaps'] ?? data['googleMaps'] ?? '').toString().trim();
+  final address = (data['alamat'] ?? '').toString().trim();
+  final query = address.isNotEmpty ? address : (data['judul'] ?? data['nama'] ?? '').toString();
+  final uri = Uri.tryParse(link.isNotEmpty
+      ? link
+      : 'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(query)}');
+  if (uri != null && await canLaunchUrl(uri)) {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } else if (context.mounted) {
+    showMessage(context, 'Lokasi belum tersedia atau Google Maps tidak dapat dibuka.');
+  }
+}
+
 class DashboardEmergencyPreview extends StatelessWidget {
   const DashboardEmergencyPreview({super.key});
+
+  Future<void> _showDetail(BuildContext context, Map<String, dynamic> data) async {
+    final title = (data['judul'] ?? data['nama'] ?? data['kategori'] ?? 'Layanan darurat').toString();
+    final phone = (data['telepon'] ?? '').toString().trim();
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            if ((data['kategori'] ?? '').toString().trim().isNotEmpty)
+              _DetailLine(label: 'Jenis layanan', value: data['kategori'].toString()),
+            if (phone.isNotEmpty) _DetailLine(label: 'Nomor telepon', value: phone),
+            if ((data['alamat'] ?? '').toString().trim().isNotEmpty)
+              _DetailLine(label: 'Alamat', value: data['alamat'].toString()),
+            if ((data['catatan'] ?? data['keterangan'] ?? '').toString().trim().isNotEmpty)
+              _DetailLine(label: 'Keterangan', value: (data['catatan'] ?? data['keterangan']).toString()),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Tutup')),
+          if (phone.isNotEmpty)
+            TextButton.icon(onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call), label: const Text('Telepon')),
+          if (phone.isNotEmpty)
+            FilledButton.icon(onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat), label: const Text('WhatsApp')),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
     stream: Db.module('kontak_darurat').limit(3).snapshots(),
     builder: (context, snapshot) {
       if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
-      final docs = snapshot.data!.docs;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const _DashboardSectionTitle(title: 'Kontak Darurat'),
-        ...docs.map((doc) {
+        ...snapshot.data!.docs.map((doc) {
           final d = doc.data();
           final title = (d['judul'] ?? d['nama'] ?? d['kategori'] ?? 'Layanan darurat').toString();
           final phone = (d['telepon'] ?? '').toString().trim();
           return Card(
             margin: const EdgeInsets.only(bottom: 7),
             child: ListTile(
+              onTap: () => _showDetail(context, d),
               leading: const CircleAvatar(backgroundColor: Color(0xFFFFE8E6),
                 child: Icon(Icons.phone_in_talk, color: Color(0xFFD94B45))),
               title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(phone.isEmpty ? 'Nomor belum tersedia' : phone),
-              trailing: phone.isEmpty ? null : IconButton(
+              subtitle: Text(phone.isEmpty ? 'Ketuk untuk melihat detail' : phone),
+              trailing: phone.isEmpty ? const Icon(Icons.chevron_right) : IconButton(
                 tooltip: 'Telepon',
                 icon: const Icon(Icons.call, color: Color(0xFF21865D)),
-                onPressed: () async {
-                  final uri = Uri(scheme: 'tel', path: phone.replaceAll(RegExp(r'[^0-9+]'), ''));
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri);
-                  } else if (context.mounted) {
-                    showMessage(context, 'Tidak dapat membuka aplikasi telepon.');
-                  }
-                },
+                onPressed: () => _openPhone(context, phone),
               ),
             ),
           );
@@ -922,6 +989,45 @@ class DashboardEmergencyPreview extends StatelessWidget {
 
 class DashboardHealthPreview extends StatelessWidget {
   const DashboardHealthPreview({super.key});
+
+  Future<void> _showDetail(BuildContext context, Map<String, dynamic> data) async {
+    final title = (data['judul'] ?? data['nama'] ?? data['jenisFasilitas'] ?? 'Fasilitas kesehatan').toString();
+    final phone = (data['telepon'] ?? '').toString().trim();
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: SingleChildScrollView(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+            if ((data['jenisFasilitas'] ?? '').toString().trim().isNotEmpty)
+              _DetailLine(label: 'Jenis fasilitas', value: data['jenisFasilitas'].toString()),
+            if ((data['alamat'] ?? '').toString().trim().isNotEmpty)
+              _DetailLine(label: 'Alamat', value: data['alamat'].toString()),
+            if ((data['telepon'] ?? '').toString().trim().isNotEmpty)
+              _DetailLine(label: 'Telepon / WhatsApp', value: phone),
+            if ((data['jamBuka'] ?? '').toString().trim().isNotEmpty)
+              _DetailLine(label: 'Jam pelayanan', value: data['jamBuka'].toString()),
+            if ((data['layanan'] ?? '').toString().trim().isNotEmpty)
+              _DetailLine(label: 'Jenis layanan', value: data['layanan'].toString()),
+            if ((data['catatan'] ?? '').toString().trim().isNotEmpty)
+              _DetailLine(label: 'Keterangan', value: data['catatan'].toString()),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Tutup')),
+          if (phone.isNotEmpty)
+            TextButton.icon(onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call), label: const Text('Telepon')),
+          if (phone.isNotEmpty)
+            TextButton.icon(onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat), label: const Text('WhatsApp')),
+          FilledButton.icon(
+            onPressed: () => _openHealthMap(context, data),
+            icon: const Icon(Icons.map_outlined),
+            label: const Text('Google Maps'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -938,16 +1044,34 @@ class DashboardHealthPreview extends StatelessWidget {
           return Card(
             margin: const EdgeInsets.only(bottom: 7),
             child: ListTile(
+              onTap: () => _showDetail(context, d),
               leading: const CircleAvatar(backgroundColor: Color(0xFFE4F3EB),
                 child: Icon(Icons.health_and_safety, color: Color(0xFF21865D))),
               title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
               subtitle: Text([address, hours].where((v) => v.trim().isNotEmpty).join(' • '),
                 maxLines: 2, overflow: TextOverflow.ellipsis),
+              trailing: const Icon(Icons.chevron_right),
             ),
           );
         }),
       ]);
     },
+  );
+}
+
+class _DetailLine extends StatelessWidget {
+  final String label;
+  final String value;
+  const _DetailLine({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+      const SizedBox(height: 2),
+      SelectableText(value, style: const TextStyle(fontWeight: FontWeight.w500)),
+    ]),
   );
 }
 
