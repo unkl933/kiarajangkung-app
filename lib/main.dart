@@ -732,7 +732,7 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 12),
         const DashboardAnnouncements(),
         const SizedBox(height: 18),
-        const DashboardPopulationStats(),
+        DashboardPopulationStats(isAdmin: isAdmin),
         const SizedBox(height: 16),
         const DashboardGallery(),
         const SizedBox(height: 16),
@@ -929,72 +929,57 @@ Future<void> _openHealthMap(BuildContext context, Map<String, dynamic> data) asy
 
 class DashboardEmergencyPreview extends StatelessWidget {
   const DashboardEmergencyPreview({super.key});
-
   Future<void> _showDetail(BuildContext context, Map<String, dynamic> data) async {
     final title = (data['judul'] ?? data['nama'] ?? data['kategori'] ?? 'Layanan darurat').toString();
     final phone = (data['telepon'] ?? '').toString().trim();
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(title),
-        content: SingleChildScrollView(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            if ((data['kategori'] ?? '').toString().trim().isNotEmpty)
-              _DetailLine(label: 'Jenis layanan', value: data['kategori'].toString()),
-            if (phone.isNotEmpty) _DetailLine(label: 'Nomor telepon', value: phone),
-            if ((data['alamat'] ?? '').toString().trim().isNotEmpty)
-              _DetailLine(label: 'Alamat', value: data['alamat'].toString()),
-            if ((data['catatan'] ?? data['keterangan'] ?? '').toString().trim().isNotEmpty)
-              _DetailLine(label: 'Keterangan', value: (data['catatan'] ?? data['keterangan']).toString()),
-          ]),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Tutup')),
-          if (phone.isNotEmpty)
-            TextButton.icon(onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call), label: const Text('Telepon')),
-          if (phone.isNotEmpty)
-            FilledButton.icon(onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat), label: const Text('WhatsApp')),
-          if ((data['lokasiMaps'] ?? data['googleMaps'] ?? data['alamat'] ?? '').toString().trim().isNotEmpty)
-            TextButton.icon(
-              onPressed: () => openGoogleMaps(
-                context,
-                (data['lokasiMaps'] ?? data['googleMaps'] ?? data['alamat']).toString(),
-              ),
-              icon: const Icon(Icons.location_on_outlined),
-              label: const Text('Buka Lokasi'),
-            ),
-        ],
-      ),
-    );
+    final address = (data['alamat'] ?? '').toString().trim();
+    final description = (data['catatan'] ?? data['keterangan'] ?? data['deskripsi'] ?? '').toString().trim();
+    final maps = (data['lokasiMaps'] ?? data['googleMaps'] ?? '').toString().trim();
+    await showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if ((data['kategori'] ?? '').toString().trim().isNotEmpty) _DetailLine(label: 'Jenis layanan', value: data['kategori'].toString()),
+        if (phone.isNotEmpty) _DetailLine(label: 'Nomor telepon', value: phone),
+        if (address.isNotEmpty) _DetailLine(label: 'Alamat', value: address),
+        if (description.isNotEmpty) _DetailLine(label: 'Keterangan', value: description),
+      ])),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Tutup')),
+        if (phone.isNotEmpty) TextButton.icon(onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call), label: const Text('Telepon')),
+        if (phone.isNotEmpty) TextButton.icon(onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat), label: const Text('WhatsApp')),
+        if (address.isNotEmpty || maps.isNotEmpty) FilledButton.icon(onPressed: () => _openHealthMap(context, data), icon: const Icon(Icons.location_on_outlined), label: const Text('Buka Lokasi')),
+      ],
+    ));
   }
-
   @override
   Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-    stream: Db.module('kontak_darurat').limit(3).snapshots(),
+    stream: Db.module('kontak_darurat').snapshots(),
     builder: (context, snapshot) {
       if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
+      final docs = snapshot.data!.docs;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const _DashboardSectionTitle(title: 'Kontak Darurat'),
-        ...snapshot.data!.docs.map((doc) {
-          final d = doc.data();
-          final title = (d['judul'] ?? d['nama'] ?? d['kategori'] ?? 'Layanan darurat').toString();
-          final phone = (d['telepon'] ?? '').toString().trim();
-          return Card(
-            margin: const EdgeInsets.only(bottom: 7),
-            child: ListTile(
-              onTap: () => _showDetail(context, d),
-              leading: const CircleAvatar(backgroundColor: Color(0xFFFFE8E6),
-                child: Icon(Icons.phone_in_talk, color: Color(0xFFD94B45))),
-              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(phone.isEmpty ? 'Ketuk untuk melihat detail' : phone),
-              trailing: phone.isEmpty ? const Icon(Icons.chevron_right) : IconButton(
-                tooltip: 'Telepon',
-                icon: const Icon(Icons.call, color: Color(0xFF21865D)),
-                onPressed: () => _openPhone(context, phone),
-              ),
-            ),
-          );
-        }),
+        SizedBox(height: 154, child: ListView.separated(
+          scrollDirection: Axis.horizontal, physics: const BouncingScrollPhysics(),
+          itemCount: docs.length, separatorBuilder: (_, __) => const SizedBox(width: 9),
+          itemBuilder: (context, i) {
+            final d = docs[i].data();
+            final title = (d['judul'] ?? d['nama'] ?? d['kategori'] ?? 'Layanan darurat').toString();
+            final phone = (d['telepon'] ?? '').toString().trim();
+            return SizedBox(width: 248, child: Card(child: InkWell(
+              borderRadius: BorderRadius.circular(18), onTap: () => _showDetail(context, d),
+              child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [const CircleAvatar(backgroundColor: Color(0xFFFFE8E6), child: Icon(Icons.emergency, color: Color(0xFFD94B45))), const SizedBox(width: 9), Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)))]),
+                const Spacer(), Text(phone.isEmpty ? 'Nomor belum tersedia' : phone, style: const TextStyle(fontSize: 12)), const SizedBox(height: 4),
+                Row(children: [
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'Telepon', onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call, color: Color(0xFF21865D))),
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'WhatsApp', onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat, color: Color(0xFF21865D))),
+                  const Spacer(), const Text('Detail', style: TextStyle(fontSize: 11, color: Color(0xFF21865D))),
+                ]),
+              ])),
+            )));
+          },
+        )),
       ]);
     },
   );
@@ -1002,71 +987,61 @@ class DashboardEmergencyPreview extends StatelessWidget {
 
 class DashboardHealthPreview extends StatelessWidget {
   const DashboardHealthPreview({super.key});
-
   Future<void> _showDetail(BuildContext context, Map<String, dynamic> data) async {
     final title = (data['judul'] ?? data['nama'] ?? data['jenisFasilitas'] ?? 'Fasilitas kesehatan').toString();
     final phone = (data['telepon'] ?? '').toString().trim();
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(title),
-        content: SingleChildScrollView(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            if ((data['jenisFasilitas'] ?? '').toString().trim().isNotEmpty)
-              _DetailLine(label: 'Jenis fasilitas', value: data['jenisFasilitas'].toString()),
-            if ((data['alamat'] ?? '').toString().trim().isNotEmpty)
-              _DetailLine(label: 'Alamat', value: data['alamat'].toString()),
-            if ((data['telepon'] ?? '').toString().trim().isNotEmpty)
-              _DetailLine(label: 'Telepon / WhatsApp', value: phone),
-            if ((data['jamBuka'] ?? '').toString().trim().isNotEmpty)
-              _DetailLine(label: 'Jam pelayanan', value: data['jamBuka'].toString()),
-            if ((data['layanan'] ?? '').toString().trim().isNotEmpty)
-              _DetailLine(label: 'Jenis layanan', value: data['layanan'].toString()),
-            if ((data['catatan'] ?? '').toString().trim().isNotEmpty)
-              _DetailLine(label: 'Keterangan', value: data['catatan'].toString()),
-          ]),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Tutup')),
-          if (phone.isNotEmpty)
-            TextButton.icon(onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call), label: const Text('Telepon')),
-          if (phone.isNotEmpty)
-            TextButton.icon(onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat), label: const Text('WhatsApp')),
-          FilledButton.icon(
-            onPressed: () => _openHealthMap(context, data),
-            icon: const Icon(Icons.map_outlined),
-            label: const Text('Google Maps'),
-          ),
-        ],
-      ),
-    );
+    final address = (data['alamat'] ?? '').toString().trim();
+    final hours = (data['jamBuka'] ?? '').toString().trim();
+    final services = (data['layanan'] ?? '').toString().trim();
+    final description = (data['catatan'] ?? data['deskripsi'] ?? '').toString().trim();
+    await showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
+      title: Text(title),
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if ((data['jenisFasilitas'] ?? '').toString().trim().isNotEmpty) _DetailLine(label: 'Jenis fasilitas', value: data['jenisFasilitas'].toString()),
+        if (address.isNotEmpty) _DetailLine(label: 'Alamat', value: address),
+        if (phone.isNotEmpty) _DetailLine(label: 'Telepon / WhatsApp', value: phone),
+        if (hours.isNotEmpty) _DetailLine(label: 'Jam pelayanan', value: hours),
+        if (services.isNotEmpty) _DetailLine(label: 'Jenis layanan', value: services),
+        if (description.isNotEmpty) _DetailLine(label: 'Keterangan', value: description),
+      ])),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Tutup')),
+        if (phone.isNotEmpty) TextButton.icon(onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call), label: const Text('Telepon')),
+        if (phone.isNotEmpty) TextButton.icon(onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat), label: const Text('WhatsApp')),
+        FilledButton.icon(onPressed: () => _openHealthMap(context, data), icon: const Icon(Icons.map_outlined), label: const Text('Google Maps')),
+      ],
+    ));
   }
-
   @override
   Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-    stream: Db.module('fasilitas_kesehatan').limit(2).snapshots(),
+    stream: Db.module('fasilitas_kesehatan').snapshots(),
     builder: (context, snapshot) {
       if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
+      final docs = snapshot.data!.docs;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const _DashboardSectionTitle(title: 'Fasilitas Kesehatan'),
-        ...snapshot.data!.docs.map((doc) {
-          final d = doc.data();
-          final title = (d['judul'] ?? d['nama'] ?? d['jenisFasilitas'] ?? 'Fasilitas kesehatan').toString();
-          final address = (d['alamat'] ?? '').toString();
-          final hours = (d['jamBuka'] ?? '').toString();
-          return Card(
-            margin: const EdgeInsets.only(bottom: 7),
-            child: ListTile(
-              onTap: () => _showDetail(context, d),
-              leading: const CircleAvatar(backgroundColor: Color(0xFFE4F3EB),
-                child: Icon(Icons.health_and_safety, color: Color(0xFF21865D))),
-              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text([address, hours].where((v) => v.trim().isNotEmpty).join(' • '),
-                maxLines: 2, overflow: TextOverflow.ellipsis),
-              trailing: const Icon(Icons.chevron_right),
-            ),
-          );
-        }),
+        SizedBox(height: 166, child: ListView.separated(
+          scrollDirection: Axis.horizontal, physics: const BouncingScrollPhysics(),
+          itemCount: docs.length, separatorBuilder: (_, __) => const SizedBox(width: 9),
+          itemBuilder: (context, i) {
+            final d = docs[i].data();
+            final title = (d['judul'] ?? d['nama'] ?? d['jenisFasilitas'] ?? 'Fasilitas kesehatan').toString();
+            final address = (d['alamat'] ?? '').toString();
+            final phone = (d['telepon'] ?? '').toString().trim();
+            return SizedBox(width: 258, child: Card(child: InkWell(
+              borderRadius: BorderRadius.circular(18), onTap: () => _showDetail(context, d),
+              child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [const CircleAvatar(backgroundColor: Color(0xFFE4F3EB), child: Icon(Icons.health_and_safety, color: Color(0xFF21865D))), const SizedBox(width: 9), Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)))]),
+                const SizedBox(height: 8), Expanded(child: Text(address.isEmpty ? 'Alamat belum tersedia' : address, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11))),
+                Row(children: [
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'Telepon', onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call, color: Color(0xFF21865D))),
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'WhatsApp', onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat, color: Color(0xFF21865D))),
+                  const Spacer(), const Text('Detail', style: TextStyle(fontSize: 11, color: Color(0xFF21865D))),
+                ]),
+              ])),
+            )));
+          },
+        )),
       ]);
     },
   );
@@ -1344,44 +1319,70 @@ class DashboardRondaPreview extends StatelessWidget {
   }
 }
 
-class DashboardPopulationStats extends StatelessWidget {
-  const DashboardPopulationStats({super.key});
+class DashboardPopulationStats extends StatefulWidget {
+  final bool isAdmin;
+  const DashboardPopulationStats({super.key, required this.isAdmin});
   @override
-  Widget build(BuildContext context) => StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(
-    stream: Db.module('statistik').doc('penduduk').snapshots(),
-    builder: (context, snap) {
-      if (!snap.hasData || !snap.data!.exists) return const SizedBox.shrink();
-      final d = snap.data!.data() ?? {};
-      final total = (d['totalPenduduk'] ?? 0) as num;
-      final male = (d['lakiLaki'] ?? 0) as num;
-      final female = (d['perempuan'] ?? 0) as num;
-      final kk = (d['totalKK'] ?? 0) as num;
-      final mp = total == 0 ? 0.0 : male / total;
-      final fp = total == 0 ? 0.0 : female / total;
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const _DashboardSectionTitle(title: 'Statistik Penduduk'),
-        Card(child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () => showModalBottomSheet<void>(context: context, showDragHandle: true, builder: (ctx) => Padding(
-            padding: const EdgeInsets.all(22), child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Text('Rincian Kependudukan', style: Theme.of(ctx).textTheme.titleLarge),
-              const SizedBox(height: 18),
-              _statItem('Total Penduduk', '$total jiwa', Icons.groups_outlined),
-              _statItem('Total Kepala Keluarga', '$kk KK', Icons.home_work_outlined),
-              _statItem('Laki-laki', '$male jiwa (${(mp*100).round()}%)', Icons.male),
-              _statItem('Perempuan', '$female jiwa (${(fp*100).round()}%)', Icons.female),
-            ]),
-          )),
-          child: Padding(padding: const EdgeInsets.all(14), child: Column(children: [
-            Row(children: [Expanded(child: _statItem('Total Penduduk', '$total', Icons.groups_outlined)), Expanded(child: _statItem('Total KK', '$kk', Icons.home_work_outlined))]),
-            const SizedBox(height: 14),
-            Row(children: [Expanded(child: _genderCircle('Laki-laki', male.toInt(), mp)), Expanded(child: _genderCircle('Perempuan', female.toInt(), fp))]),
-            const SizedBox(height: 8), const Text('Ketuk untuk melihat rincian', style: TextStyle(fontSize: 10, color: Colors.black54)),
-          ])),
-        )),
-      ]);
-    },
-  );
+  State<DashboardPopulationStats> createState() => _DashboardPopulationStatsState();
+}
+
+class _DashboardPopulationStatsState extends State<DashboardPopulationStats> {
+  String? _lastPublished;
+  DocumentReference<Map<String, dynamic>> get _summaryRef => Db.module('statistik_penduduk').doc('ringkasan');
+
+  Widget _renderStats(BuildContext context, int total, int male, int female, int kk) {
+    final malePct = total == 0 ? 0.0 : male / total;
+    final femalePct = total == 0 ? 0.0 : female / total;
+    return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Statistik Penduduk', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+      const SizedBox(height: 4), const Text('Diperbarui otomatis dari Data Sensus Penduduk', style: TextStyle(fontSize: 10, color: Colors.black54)),
+      const SizedBox(height: 12), Row(children: [
+        Expanded(child: _populationRing('Laki-laki', male, malePct, const Color(0xFF3979B9))),
+        Expanded(child: _populationRing('Perempuan', female, femalePct, const Color(0xFFD66A91))),
+      ]),
+      const Divider(height: 20), Row(children: [
+        Expanded(child: _populationNumber('Total penduduk', total, Icons.groups_outlined)),
+        Expanded(child: _populationNumber('Total KK', kk, Icons.home_work_outlined)),
+      ]),
+      Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () => showDialog<void>(context: context, builder: (ctx) => AlertDialog(title: const Text('Rincian Penduduk'), content: Text('Total penduduk: $total jiwa\nLaki-laki: $male jiwa (${(malePct * 100).toStringAsFixed(1)}%)\nPerempuan: $female jiwa (${(femalePct * 100).toStringAsFixed(1)}%)\nTotal kepala keluarga: $kk KK'), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Tutup'))])), child: const Text('Lihat rincian'))),
+    ])));
+  }
+
+  Map<String, int> _count(Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+    final list = docs.toList();
+    final male = list.where((d) => ['laki-laki','laki laki','l','pria'].contains((d.data()['jenisKelamin'] ?? '').toString().trim().toLowerCase())).length;
+    final female = list.where((d) => ['perempuan','wanita','p'].contains((d.data()['jenisKelamin'] ?? '').toString().trim().toLowerCase())).length;
+    final kk = list.map((d) => (d.data()['noKK'] ?? '').toString().trim()).where((v) => v.isNotEmpty).toSet().length;
+    return {'total': list.length, 'male': male, 'female': female, 'kk': kk};
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.isAdmin) {
+      return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: Db.module('sensus').snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) return const SizedBox.shrink();
+          if (!snapshot.hasData) return const Center(child: Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator()));
+          final counts = _count(snapshot.data!.docs);
+          final signature = '${counts['total']}:${counts['male']}:${counts['female']}:${counts['kk']}';
+          if (_lastPublished != signature) {
+            _lastPublished = signature;
+            Future.microtask(() => _summaryRef.set({...counts, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true)));
+          }
+          return _renderStats(context, counts['total']!, counts['male']!, counts['female']!, counts['kk']!);
+        },
+      );
+    }
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _summaryRef.snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData || !snapshot.data!.exists) return const SizedBox.shrink();
+        final d = snapshot.data!.data()!;
+        return _renderStats(context, (d['total'] as num?)?.toInt() ?? 0, (d['male'] as num?)?.toInt() ?? 0, (d['female'] as num?)?.toInt() ?? 0, (d['kk'] as num?)?.toInt() ?? 0);
+      },
+    );
+  }
 }
 Widget _genderCircle(String title, int count, double percent) => Column(children: [
   SizedBox(width: 76, height: 76, child: Stack(alignment: Alignment.center, children: [
@@ -1391,6 +1392,17 @@ Widget _genderCircle(String title, int count, double percent) => Column(children
   const SizedBox(height: 5), Text('$title ($count)', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
 ]);
 Widget _statItem(String title,String value,IconData icon)=>Padding(padding:const EdgeInsets.symmetric(vertical:5),child:Column(children:[Icon(icon,color:const Color(0xFF167C55)),const SizedBox(height:4),Text(value,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:18)),Text(title,style:const TextStyle(fontSize:11,color:Colors.black54))]));
+
+
+Widget _populationRing(String label, int count, double pct, Color color) => Column(children: [
+  SizedBox(width: 82, height: 82, child: Stack(alignment: Alignment.center, children: [
+    SizedBox.expand(child: CircularProgressIndicator(value: pct, strokeWidth: 8, backgroundColor: color.withOpacity(.13), valueColor: AlwaysStoppedAnimation<Color>(color))),
+    Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text('${(pct * 100).toStringAsFixed(1)}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)), Text('$count jiwa', style: const TextStyle(fontSize: 9))]),
+  ])), const SizedBox(height: 6), Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+]);
+
+
+Widget _populationNumber(String label, int count, IconData icon) => Row(children: [Icon(icon, color: const Color(0xFF21865D)), const SizedBox(width: 7), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('$count', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)), Text(label, style: const TextStyle(fontSize: 10, color: Colors.black54))]))]);
 
 class DashboardAnnouncements extends StatelessWidget {
   const DashboardAnnouncements({super.key});
