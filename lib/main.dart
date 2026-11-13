@@ -985,12 +985,129 @@ class _RondaSchedulePageState extends State<RondaSchedulePage> {
           const SizedBox(height: 16),
           Row(children: [Expanded(child: Text('$dayName, ${selectedDate.day}-${selectedDate.month}-${selectedDate.year}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold))), IconButton(onPressed: () => setState(() { selectedDate = selectedDate.subtract(const Duration(days: 7)); }), icon: const Icon(Icons.chevron_left)), IconButton(onPressed: () => setState(() { selectedDate = selectedDate.add(const Duration(days: 7)); }), icon: const Icon(Icons.chevron_right))]),
           if (selected.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('Belum ada petugas yang dijadwalkan pada hari ini.'))),
-          ...selected.map((doc) { final d = doc.data(); final names = (d['anggota'] ?? '').toString().split(RegExp(r'[,;\n]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList(); return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('RT ${d['rt'] ?? '-'} / RW ${d['rw'] ?? '-'}', style: const TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 4), Text('Waktu: ${d['jamMulai'] ?? '21.00'} – ${d['jamSelesai'] ?? '04.00'}'), const Divider(), const Text('Petugas ronda', style: TextStyle(fontWeight: FontWeight.w700)), if (names.isEmpty) const Text('Nama petugas belum diisi.'), ...names.map((n) => ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: const Icon(Icons.person_outline), title: Text(n))), const SizedBox(height: 8), _RondaAttendance(dateKey: dateKey, day: dayName, scheduleId: doc.id, names: names)]))); }),
+          ...selected.map((doc) {
+            final d = doc.data();
+            final names = (d['anggota'] ?? '').toString()
+                .split(RegExp(r'[,;\n]'))
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty)
+                .toList();
+            return Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Expanded(child: Text('RT ${d['rt'] ?? '-'} / RW ${d['rw'] ?? '-'}',
+                        style: const TextStyle(fontWeight: FontWeight.bold))),
+                      if (widget.isAdmin) ...[
+                        IconButton(
+                          tooltip: 'Edit jadwal',
+                          icon: const Icon(Icons.edit_outlined, color: Color(0xFF167C55)),
+                          onPressed: () => showRecordForm(
+                            context,
+                            modules.firstWhere((m) => m.keyName == 'ronda'),
+                            isAdmin: true,
+                            docId: doc.id,
+                            initial: d,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Hapus jadwal',
+                          icon: const Icon(Icons.delete_outline, color: Colors.red),
+                          onPressed: () async {
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (dialogContext) => AlertDialog(
+                                title: const Text('Hapus jadwal ronda?'),
+                                content: Text('Jadwal ${d['hari'] ?? dayName}, RT ${d['rt'] ?? '-'} / RW ${d['rw'] ?? '-'} akan dihapus.'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Batal')),
+                                  FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Hapus')),
+                                ],
+                              ),
+                            );
+                            if (confirm == true) {
+                              try {
+                                await Db.module('ronda').doc(doc.id).delete();
+                                if (context.mounted) showMessage(context, 'Jadwal ronda berhasil dihapus.');
+                              } catch (e) {
+                                if (context.mounted) showMessage(context, 'Gagal menghapus jadwal: $e');
+                              }
+                            }
+                          },
+                        ),
+                      ],
+                    ]),
+                    const SizedBox(height: 4),
+                    Text('Waktu: ${d['jamMulai'] ?? '21.00'} – ${d['jamSelesai'] ?? '04.00'}'),
+                    const Divider(),
+                    const Text('Petugas ronda', style: TextStyle(fontWeight: FontWeight.w700)),
+                    if (names.isEmpty) const Text('Nama petugas belum diisi.'),
+                    if (names.isNotEmpty)
+                      _RondaRosterStatus(dateKey: dateKey, scheduleId: doc.id, names: names),
+                    const SizedBox(height: 8),
+                    _RondaAttendance(dateKey: dateKey, day: dayName, scheduleId: doc.id, names: names),
+                  ],
+                ),
+              ),
+            );
+          }),
           const SizedBox(height: 12),
           const Text('Pengingat push H-1 dan 1 jam sebelum ronda serta notifikasi perubahan jadwal memerlukan Firebase Cloud Messaging dan fungsi server terjadwal.', style: TextStyle(fontSize: 11, color: Colors.black54)),
         ]);
       },
     ),
+  );
+}
+
+class _RondaRosterStatus extends StatelessWidget {
+  final String dateKey;
+  final String scheduleId;
+  final List<String> names;
+
+  const _RondaRosterStatus({
+    required this.dateKey,
+    required this.scheduleId,
+    required this.names,
+  });
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    stream: Db.module('ronda_absensi')
+        .where('tanggal', isEqualTo: dateKey)
+        .where('scheduleId', isEqualTo: scheduleId)
+        .snapshots(),
+    builder: (context, snapshot) {
+      final present = <String>{};
+      for (final attendanceDoc in snapshot.data?.docs ?? []) {
+        final name = (attendanceDoc.data()['nama'] ?? '').toString().trim().toLowerCase();
+        if (name.isNotEmpty) present.add(name);
+      }
+      return Column(
+        children: names.map((name) {
+          final isPresent = present.contains(name.trim().toLowerCase());
+          return ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(
+              isPresent ? Icons.check_circle : Icons.cancel,
+              color: isPresent ? Colors.green : Colors.red,
+            ),
+            title: Text(name),
+            trailing: Text(
+              isPresent ? 'HADIR' : 'BELUM HADIR',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: isPresent ? Colors.green.shade700 : Colors.red.shade700,
+              ),
+            ),
+          );
+        }).toList(),
+      );
+    },
   );
 }
 
