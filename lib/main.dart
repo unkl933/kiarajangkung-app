@@ -155,16 +155,36 @@ class PhotoService {
     }
   }
 
-  static Future<String> upload(Uint8List bytes, String moduleKey) async {
+  static Future<String> upload(Uint8List bytes, String moduleKey, {String? docId}) async {
     if (bytes.lengthInBytes > maxBytes) throw Exception('Foto melebihi batas 1 MB.');
     final result = await _request({
       'action': 'upload',
       'module': moduleKey,
+      if (docId != null) 'docId': docId,
       'fileName': '${DateTime.now().millisecondsSinceEpoch}.jpg',
       'mimeType': 'image/jpeg',
       'base64': base64Encode(bytes),
     });
     return (result['imageUrl'] ?? '').toString();
+  }
+
+  static Future<Map<String, dynamic>> provisionResident({
+    required String nik,
+    required String nama,
+    required String tanggalLahir,
+    String telepon = '',
+    String rt = '',
+    String rw = '',
+  }) async {
+    return _request({
+      'action': 'provisionResident',
+      'nik': nik,
+      'nama': nama,
+      'tanggalLahir': tanggalLahir,
+      'telepon': telepon,
+      'rt': rt,
+      'rw': rw,
+    });
   }
 
   static Future<void> deleteIfOwned(String? url) async {
@@ -215,9 +235,14 @@ class UserProfileGate extends StatelessWidget {
           return ErrorPage(message: 'Gagal membaca profil: ${snapshot.error}');
         }
         if (!snapshot.hasData || !snapshot.data!.exists) {
-          return CompleteProfilePage(user: user);
+          return const PendingAccountPage();
+        }
+        final accountStatus = (snapshot.data!.data()?['status'] ?? 'Aktif').toString().toLowerCase();
+        if (accountStatus == 'nonaktif' || accountStatus == 'pending') {
+          return const PendingAccountPage(inactive: true);
         }
         final data = snapshot.data!.data() ?? {};
+        if (data['mustChangePassword'] == true) return const ChangePasswordPage(force: true);
         return HomePage(
           user: user,
           profile: data,
@@ -259,38 +284,29 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final email = TextEditingController();
   final password = TextEditingController();
-  bool isLogin = true;
   bool busy = false;
   bool obscure = true;
 
   Future<void> submit() async {
-    if (email.text.trim().isEmpty || password.text.length < 6) {
-      showMessage(context, 'Masukkan email dan password minimal 6 karakter.');
+    final identity = email.text.trim();
+    final isNik = RegExp(r'^\d{16}$').hasMatch(identity);
+    if (!isNik && !identity.contains('@')) {
+      showMessage(context, 'Masukkan NIK 16 digit. Akun pengurus lama masih dapat masuk menggunakan email.');
+      return;
+    }
+    if (password.text.isEmpty) {
+      showMessage(context, 'Password wajib diisi.');
       return;
     }
     setState(() => busy = true);
     try {
-      UserCredential result;
-      if (isLogin) {
-        result = await Db.auth.signInWithEmailAndPassword(
-          email: email.text.trim(),
-          password: password.text,
-        );
-      } else {
-        result = await Db.auth.createUserWithEmailAndPassword(
-          email: email.text.trim(),
-          password: password.text,
-        );
-        await Db.user(result.user!.uid).set({
-          'nama': result.user!.displayName ?? '',
-          'email': email.text.trim(),
-          'telepon': '',
-          'alamat': '',
-          'role': 'warga',
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
+      // Akun warga memakai alias email internal berbasis NIK.
+      // Akun Owner/Admin lama tetap dapat memakai email Firebase yang sudah ada.
+      final loginEmail = isNik ? '$identity@login.kiarajangkung.id' : identity;
+      await Db.auth.signInWithEmailAndPassword(
+        email: loginEmail,
+        password: password.text,
+      );
     } on FirebaseAuthException catch (e) {
       showMessage(context, authError(e));
     } catch (e) {
@@ -340,15 +356,16 @@ class _LoginPageState extends State<LoginPage> {
                   Text('Kiarajangkung • Informasi dan layanan warga',
                       style: TextStyle(color: Colors.grey.shade600)),
                   const SizedBox(height: 32),
-                  Text(isLogin ? 'Selamat datang kembali' : 'Buat akun warga',
+                  Text('Masuk ke akun warga',
                       style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 18),
                   TextField(
                     controller: email,
                     keyboardType: TextInputType.emailAddress,
                     decoration: const InputDecoration(
-                      labelText: 'Email',
-                      prefixIcon: Icon(Icons.email_outlined),
+                      labelText: 'NIK (16 digit) / Email pengurus',
+                      hintText: 'Masukkan NIK. Akun Owner/Admin lama dapat memakai email.',
+                      prefixIcon: Icon(Icons.badge_outlined),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -356,7 +373,7 @@ class _LoginPageState extends State<LoginPage> {
                     controller: password,
                     obscureText: obscure,
                     decoration: InputDecoration(
-                      labelText: 'Password',
+                      labelText: 'Password (awal: tanggal lahir DDMMYYYY)',
                       prefixIcon: const Icon(Icons.lock_outline),
                       suffixIcon: IconButton(
                         onPressed: () => setState(() => obscure = !obscure),
@@ -376,14 +393,19 @@ class _LoginPageState extends State<LoginPage> {
                             width: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : Text(isLogin ? 'Masuk' : 'Daftar akun'),
+                        : const Text('Masuk'),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   TextButton(
-                    onPressed: busy ? null : () => setState(() => isLogin = !isLogin),
-                    child: Text(isLogin
-                        ? 'Belum punya akun? Daftar warga'
-                        : 'Sudah punya akun? Masuk'),
+                    onPressed: busy ? null : () => showDialog<void>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Lupa password?'),
+                        content: const Text('Silakan hubungi Admin atau Owner Kampung untuk verifikasi data dan reset password.'),
+                        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Mengerti'))],
+                      ),
+                    ),
+                    child: const Text('Lupa password? Hubungi Admin / Owner'),
                   ),
                 ],
               ),
@@ -393,6 +415,40 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+}
+
+class PendingAccountPage extends StatelessWidget {
+  final bool inactive;
+  const PendingAccountPage({super.key, this.inactive = false});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.verified_user_outlined, size: 54),
+              const SizedBox(height: 16),
+              Text(
+                inactive ? 'Akun belum aktif' : 'Profil akun belum tersedia',
+                style: Theme.of(context).textTheme.titleLarge,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Silakan hubungi Admin/Owner Kampung Kiarajangkung. Akun warga dibuat melalui data Sensus Penduduk.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () => Db.auth.signOut(),
+                icon: const Icon(Icons.logout),
+                label: const Text('Keluar'),
+              ),
+            ]),
+          ),
+        ),
+      );
 }
 
 class CompleteProfilePage extends StatefulWidget {
@@ -478,6 +534,7 @@ const modules = <ModuleInfo>[
   ModuleInfo('kesenian', 'Kesenian & Budaya', 'Sanggar, paguron dan seni tradisi', Icons.theater_comedy_outlined),
   ModuleInfo('kebersihan', 'Kebersihan', 'Jadwal pengangkutan sampah setiap Jumat pagi', Icons.cleaning_services_outlined),
   ModuleInfo('fasilitas_kesehatan', 'Fasilitas Kesehatan', 'Klinik, puskesmas dan apotek', Icons.local_hospital_outlined),
+  ModuleInfo('organisasi', 'Organisasi & Lembaga Kampung', 'Karang Taruna, PKK, Posyandu, kelompok tani dan lainnya', Icons.groups_2_outlined),
 ];
 
 class HomePage extends StatefulWidget {
@@ -864,20 +921,24 @@ class ModulePage extends StatelessWidget {
               final title = (data['judul'] ?? data['nama'] ?? data['nama_usaha'] ?? data['nama_lengkap'] ?? 'Data kampung').toString();
               final desc = (data['deskripsi'] ?? data['keterangan'] ?? data['alamat'] ?? '').toString();
               final photo = (data['fotoUrl'] ?? data['foto'] ?? data['imageUrl'] ?? '').toString().trim();
+              final isChairForRecord = module.keyName == 'organisasi' &&
+                  (data['ketuaUid'] ?? '').toString() == Db.auth.currentUser?.uid;
+              final canEditThisRecord = canEdit || isChairForRecord;
               return Card(
                 clipBehavior: Clip.antiAlias,
                 margin: const EdgeInsets.only(bottom: 14),
                 child: InkWell(
                   onTap: () => showRecordDetail(context, title, data),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    SizedBox(
-                      height: 174,
-                      width: double.infinity,
-                      child: photo.isEmpty
-                          ? _photoPlaceholder()
-                          : Image.network(photo, fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => _photoPlaceholder()),
-                    ),
+                    if (module.keyName != 'sensus')
+                      SizedBox(
+                        height: 174,
+                        width: double.infinity,
+                        child: photo.isEmpty
+                            ? _photoPlaceholder()
+                            : Image.network(photo, fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => _photoPlaceholder()),
+                      ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(15, 12, 8, 14),
                       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -893,11 +954,17 @@ class ModulePage extends StatelessWidget {
                           const SizedBox(height: 7),
                           Text('Lihat detail  ›', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 12, fontWeight: FontWeight.w600)),
                         ])),
-                        if (canEdit) PopupMenuButton<String>(
+                        if (module.keyName == 'pengumuman')
+                          IconButton(
+                            tooltip: 'Bagikan ke WhatsApp',
+                            icon: const Icon(Icons.share_outlined, color: Colors.green),
+                            onPressed: () => shareAnnouncementToWhatsApp(context, data),
+                          ),
+                        if (canEditThisRecord) PopupMenuButton<String>(
                           onSelected: (v) async {
                             if (v == 'edit') {
-                              showRecordForm(context, module, isAdmin: canEdit, docId: doc.id, initial: data);
-                            } else if (v == 'delete') {
+                              showRecordForm(context, module, isAdmin: canEdit, isChair: isChairForRecord && !canEdit, docId: doc.id, initial: data);
+                            } else if (v == 'delete' && canEdit) {
                               final yes = await confirmDelete(context);
                               if (yes == true) {
                                 await PhotoService.deleteIfOwned(photo);
@@ -905,10 +972,12 @@ class ModulePage extends StatelessWidget {
                               }
                             }
                           },
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(value: 'edit', child: Text('Edit')),
-                            PopupMenuItem(value: 'delete', child: Text('Hapus')),
-                          ],
+                          itemBuilder: (_) => canEdit
+                              ? const [
+                                  PopupMenuItem(value: 'edit', child: Text('Edit')),
+                                  PopupMenuItem(value: 'delete', child: Text('Hapus')),
+                                ]
+                              : const [PopupMenuItem(value: 'edit', child: Text('Edit organisasi'))],
                         ) else const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.arrow_forward_ios, size: 16)),
                       ]),
                     ),
@@ -986,7 +1055,8 @@ List<ModuleField> fieldsForModule(String key) {
         ModuleField('nik', 'NIK', keyboard: TextInputType.number, required: true),
         ModuleField('jenisKelamin', 'Jenis kelamin', hint: 'Laki-laki / Perempuan'),
         ModuleField('tempatLahir', 'Tempat lahir'),
-        ModuleField('tanggalLahir', 'Tanggal lahir', hint: 'DD-MM-YYYY'),
+        ModuleField('tanggalLahir', 'Tanggal lahir', hint: 'DD-MM-YYYY (wajib untuk akun awal)', required: true),
+        ModuleField('telepon', 'Nomor WhatsApp', keyboard: TextInputType.phone),
         ModuleField('statusPerkawinan', 'Status perkawinan'),
         ModuleField('pendidikan', 'Pendidikan'),
         ModuleField('pekerjaan', 'Pekerjaan'),
@@ -1085,6 +1155,23 @@ List<ModuleField> fieldsForModule(String key) {
         ModuleField('layanan', 'Jenis layanan', lines: 3),
         ModuleField('catatan', 'Catatan tambahan', lines: 2),
       ];
+    case 'organisasi':
+      return const [
+        ModuleField('kategori', 'Jenis organisasi', hint: 'Karang Taruna / PKK / Posyandu / Kelompok Tani / DKM / Linmas / LPM / Lainnya', required: true),
+        ModuleField('deskripsi', 'Profil dan tujuan organisasi', lines: 4),
+        ModuleField('ketua', 'Nama ketua'),
+        ModuleField('ketuaUid', 'UID akun Ketua organisasi (diisi Owner/Admin)'),
+        ModuleField('wakil', 'Nama wakil ketua'),
+        ModuleField('sekretaris', 'Nama sekretaris'),
+        ModuleField('bendahara', 'Nama bendahara'),
+        ModuleField('anggota', 'Daftar anggota / jumlah anggota', lines: 3),
+        ModuleField('programKerja', 'Program kerja', lines: 4),
+        ModuleField('alamat', 'Alamat sekretariat'),
+        ModuleField('telepon', 'WhatsApp pengurus', keyboard: TextInputType.phone),
+        ModuleField('lokasiMaps', 'Link Google Maps sekretariat', hint: 'https://maps.google.com/...'),
+        ModuleField('periode', 'Periode kepengurusan'),
+        ModuleField('fotoUrl', 'URL foto/logo organisasi', hint: 'https://...'),
+      ];
     default:
       return const [
         ModuleField('deskripsi', 'Keterangan', lines: 3),
@@ -1099,10 +1186,11 @@ Future<void> showRecordForm(
   BuildContext context,
   ModuleInfo module, {
   required bool isAdmin,
+  bool isChair = false,
   String? docId,
   Map<String, dynamic>? initial,
 }) async {
-  if (!isAdmin) return;
+  if (!isAdmin && !isChair) return;
   final title = TextEditingController(
     text: (initial?['judul'] ?? initial?['nama'] ?? initial?['nama_usaha'] ?? '').toString(),
   );
@@ -1154,7 +1242,7 @@ Future<void> showRecordForm(
                     ),
                   ),
                   const SizedBox(height: 10),
-                  ...definitions.where((field) => field.key != 'fotoUrl').map((field) => Padding(
+                  ...definitions.where((field) => field.key != 'fotoUrl' && !(isChair && field.key == 'ketuaUid')).map((field) => Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: TextFormField(
                       controller: controllers[field.key],
@@ -1238,7 +1326,7 @@ Future<void> showRecordForm(
                       try {
                         String finalPhotoUrl = photoController.text.trim();
                         if (selectedPhoto != null) {
-                          finalPhotoUrl = await PhotoService.upload(selectedPhoto!, module.keyName);
+                          finalPhotoUrl = await PhotoService.upload(selectedPhoto!, module.keyName, docId: docId);
                           newlyUploadedPhotoUrl = finalPhotoUrl;
                         }
                       final payload = <String, dynamic>{
@@ -1260,6 +1348,21 @@ Future<void> showRecordForm(
                           payload['createdAt'] = FieldValue.serverTimestamp();
                           payload['createdBy'] = Db.auth.currentUser?.uid;
                           await Db.module(module.keyName).add(payload);
+                          if (module.keyName == 'sensus') {
+                            try {
+                              await PhotoService.provisionResident(
+                                nik: (payload['nik'] ?? '').toString().trim(),
+                                nama: title.text.trim(),
+                                tanggalLahir: (payload['tanggalLahir'] ?? '').toString().trim(),
+                                telepon: (payload['telepon'] ?? '').toString(),
+                                rt: (payload['rt'] ?? '').toString(),
+                                rw: (payload['rw'] ?? '').toString(),
+                              );
+                              if (context.mounted) showMessage(context, 'Data sensus tersimpan dan akun warga berhasil dibuat. Password awal adalah tanggal lahir DDMMYYYY; warga wajib menggantinya saat masuk pertama kali.');
+                            } catch (accountError) {
+                              if (context.mounted) showMessage(context, 'Data sensus tersimpan, tetapi akun belum berhasil dibuat: $accountError');
+                            }
+                          }
                         } else {
                           await Db.module(module.keyName).doc(docId).update(payload);
                           final oldPhoto = (initial?['fotoUrl'] ?? initial?['foto'] ?? initial?['imageUrl'] ?? '').toString();
@@ -1268,7 +1371,7 @@ Future<void> showRecordForm(
                           }
                         }
                         if (sheetContext.mounted) Navigator.pop(sheetContext);
-                        if (context.mounted) showMessage(context, 'Data berhasil disimpan.');
+                        if (context.mounted && module.keyName != 'sensus') showMessage(context, 'Data berhasil disimpan.');
                       } catch (e) {
                         if (newlyUploadedPhotoUrl != null) {
                           await PhotoService.deleteIfOwned(newlyUploadedPhotoUrl);
@@ -1295,61 +1398,108 @@ Future<void> showRecordForm(
   }
 }
 
-class ProfilePage extends StatelessWidget {
+class ProfilePage extends StatefulWidget {
   final User user;
   final Map<String, dynamic> profile;
   final bool isAdmin;
   const ProfilePage({super.key, required this.user, required this.profile, required this.isAdmin});
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  late Map<String, dynamic> profile = Map<String, dynamic>.from(widget.profile);
+  bool uploading = false;
+
+  Future<void> changePhoto() async {
+    setState(() => uploading = true);
+    try {
+      final bytes = await PhotoService.pickAndCompress();
+      final url = await PhotoService.upload(bytes, 'profil');
+      final old = (profile['fotoProfilUrl'] ?? '').toString();
+      await Db.user(widget.user.uid).update({
+        'fotoProfilUrl': url,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      if (old.isNotEmpty && old != url) await PhotoService.deleteIfOwned(old);
+      if (mounted) {
+        setState(() => profile['fotoProfilUrl'] = url);
+        showMessage(context, 'Foto profil berhasil diperbarui.');
+      }
+    } catch (e) {
+      if (mounted && !e.toString().contains('dibatalkan')) showMessage(context, 'Gagal mengganti foto profil: $e');
+    } finally {
+      if (mounted) setState(() => uploading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final photo = (profile['fotoProfilUrl'] ?? '').toString();
     return ListView(
       padding: const EdgeInsets.all(18),
       children: [
-        Center(
-          child: CircleAvatar(
-            radius: 42,
+        Center(child: Stack(alignment: Alignment.bottomRight, children: [
+          CircleAvatar(
+            radius: 48,
             backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-            child: const Icon(Icons.person, size: 44),
+            backgroundImage: photo.isNotEmpty ? NetworkImage(photo) : null,
+            child: photo.isEmpty ? const Icon(Icons.person, size: 48) : null,
           ),
-        ),
+          Material(
+            color: Theme.of(context).colorScheme.primary,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: uploading ? null : changePhoto,
+              child: Padding(padding: const EdgeInsets.all(8), child: uploading
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.camera_alt, color: Colors.white, size: 18)),
+            ),
+          ),
+        ])),
         const SizedBox(height: 12),
         Center(child: Text((profile['nama'] ?? 'Pengguna').toString(), style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold))),
-        Center(child: Text(user.email ?? '', style: TextStyle(color: Colors.grey.shade600))),
+        Center(child: Text(_maskNik((profile['nik'] ?? '').toString()), style: TextStyle(color: Colors.grey.shade600))),
         const SizedBox(height: 8),
         Center(child: Chip(label: Text((profile['role'] ?? 'warga').toString().toUpperCase()))),
         const SizedBox(height: 22),
-        Card(
-          child: Column(children: [
+        Card(child: Column(children: [
+          ListTile(
+            leading: const Icon(Icons.camera_alt_outlined),
+            title: const Text('Ganti foto profil'),
+            subtitle: const Text('Pilih foto dari galeri HP (maksimal 1 MB setelah kompresi)'),
+            onTap: uploading ? null : changePhoto,
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit data diri'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EditProfilePage(user: widget.user, profile: profile))),
+          ),
+          const Divider(height: 1),
+          if (widget.isAdmin)
             ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit data diri'),
+              leading: const Icon(Icons.admin_panel_settings_outlined),
+              title: const Text('Panel Admin'),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EditProfilePage(user: user, profile: profile))),
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminPage())),
             ),
-            const Divider(height: 1),
-            if (isAdmin)
-              ListTile(
-                leading: const Icon(Icons.admin_panel_settings_outlined),
-                title: const Text('Panel Admin'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminPage())),
-              ),
-            if (isAdmin) const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.lock_reset_outlined),
-              title: const Text('Ubah password'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangePasswordPage())),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text('Keluar akun', style: TextStyle(color: Colors.red)),
-              onTap: () async => Db.auth.signOut(),
-            ),
-          ]),
-        ),
+          if (widget.isAdmin) const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.lock_reset_outlined),
+            title: const Text('Ubah password'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChangePasswordPage())),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text('Keluar akun', style: TextStyle(color: Colors.red)),
+            onTap: () async => Db.auth.signOut(),
+          ),
+        ])),
       ],
     );
   }
@@ -1407,7 +1557,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
 }
 
 class ChangePasswordPage extends StatefulWidget {
-  const ChangePasswordPage({super.key});
+  final bool force;
+  const ChangePasswordPage({super.key, this.force = false});
   @override
   State<ChangePasswordPage> createState() => _ChangePasswordPageState();
 }
@@ -1423,9 +1574,20 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     setState(() => busy = true);
     try {
       await Db.auth.currentUser!.updatePassword(password.text);
+      await Db.user(Db.auth.currentUser!.uid).set({
+        'mustChangePassword': false,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
       if (mounted) {
         showMessage(context, 'Password berhasil diubah.');
-        Navigator.pop(context);
+        if (widget.force) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const AuthGate()),
+            (route) => false,
+          );
+        } else {
+          Navigator.pop(context);
+        }
       }
     } on FirebaseAuthException catch (e) {
       showMessage(context, e.code == 'requires-recent-login'
@@ -1489,37 +1651,58 @@ class AdminPage extends StatelessWidget {
 
 class UserManagementPage extends StatelessWidget {
   const UserManagementPage({super.key});
+
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Manajemen akun')),
-        body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: Db.firestore.collection('users').orderBy('nama').snapshots(),
-          builder: (context, snapshot) {
-            if (snapshot.hasError) return Center(child: Text('Gagal memuat akun: ${snapshot.error}'));
-            if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-            return ListView(
-              padding: const EdgeInsets.all(12),
-              children: snapshot.data!.docs.map((doc) {
-                final d = doc.data();
-                final role = (d['role'] ?? 'warga').toString();
-                return Card(
-                  child: ListTile(
-                    title: Text((d['nama'] ?? 'Tanpa nama').toString()),
-                    subtitle: Text('${d['email'] ?? ''}\nPeran: $role'),
-                    isThreeLine: true,
-                    trailing: PopupMenuButton<String>(
-                      onSelected: (value) async {
-                        await doc.reference.update({'role': value, 'updatedAt': FieldValue.serverTimestamp()});
-                        showMessage(context, 'Peran akun diperbarui menjadi $value.');
-                      },
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'warga', child: Text('Jadikan Warga')),
-                        PopupMenuItem(value: 'admin', child: Text('Jadikan Admin')),
-                      ],
-                    ),
-                  ),
+        body: FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          future: Db.user(Db.auth.currentUser!.uid).get(),
+          builder: (context, me) {
+            if (!me.hasData) return const Center(child: CircularProgressIndicator());
+            final isOwner = (me.data!.data()?['role'] ?? '').toString() == 'owner';
+            return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: Db.firestore.collection('users').orderBy('nama').snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.hasError) return Center(child: Text('Gagal memuat akun: ${snapshot.error}'));
+                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                return ListView(
+                  padding: const EdgeInsets.all(12),
+                  children: snapshot.data!.docs.map((doc) {
+                    final d = doc.data();
+                    final role = (d['role'] ?? 'warga').toString();
+                    final nik = (d['nik'] ?? '').toString();
+                    final maskedNik = nik.length == 16
+                        ? '${nik.substring(0, 4)}********${nik.substring(12)}'
+                        : 'NIK tidak tersedia';
+                    return Card(
+                      child: ListTile(
+                        title: Text((d['nama'] ?? 'Tanpa nama').toString()),
+                        subtitle: Text('$maskedNik\nPeran: $role • Status: ${(d['status'] ?? 'Aktif')}'),
+                        isThreeLine: true,
+                        trailing: isOwner && role != 'owner'
+                            ? PopupMenuButton<String>(
+                                onSelected: (value) async {
+                                  try {
+                                    await doc.reference.update({
+                                      'role': value,
+                                      'updatedAt': FieldValue.serverTimestamp(),
+                                    });
+                                    if (context.mounted) showMessage(context, 'Peran akun diperbarui menjadi $value.');
+                                  } catch (e) {
+                                    if (context.mounted) showMessage(context, 'Gagal mengubah peran: $e');
+                                  }
+                                },
+                                itemBuilder: (_) => const [
+                                  PopupMenuItem(value: 'warga', child: Text('Jadikan Warga')),
+                                  PopupMenuItem(value: 'admin', child: Text('Jadikan Admin')),
+                                ],
+                              )
+                            : Chip(label: Text(role.toUpperCase())),
+                      ),
+                    );
+                  }).toList(),
                 );
-              }).toList(),
+              },
             );
           },
         ),
@@ -1542,6 +1725,27 @@ Future<bool?> confirmDelete(BuildContext context) => showDialog<bool>(
       ),
     );
 
+
+Future<void> shareAnnouncementToWhatsApp(BuildContext context, Map<String, dynamic> data) async {
+  final title = (data['judul'] ?? data['nama'] ?? 'Pengumuman Kampung').toString();
+  final description = (data['deskripsi'] ?? data['keterangan'] ?? '').toString();
+  final date = (data['tanggal'] ?? '').toString();
+  final time = (data['waktu'] ?? '').toString();
+  final location = (data['lokasi'] ?? data['alamat'] ?? '').toString();
+  final category = (data['kategori'] ?? 'Pengumuman & Agenda').toString();
+  final buffer = StringBuffer()
+    ..writeln('📢 *$category*')
+    ..writeln('*$title*');
+  if (date.isNotEmpty) buffer.writeln('📅 Tanggal: $date');
+  if (time.isNotEmpty) buffer.writeln('⏰ Waktu: $time');
+  if (location.isNotEmpty) buffer.writeln('📍 Lokasi: $location');
+  if (description.isNotEmpty) buffer.writeln('\n$description');
+  buffer.writeln('\n_Pemerintah Kampung Kiarajangkung_');
+  final uri = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(buffer.toString())}');
+  if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    if (context.mounted) showMessage(context, 'Tidak dapat membuka WhatsApp.');
+  }
+}
 
 Future<void> openWhatsApp(BuildContext context, String rawNumber) async {
   var number = rawNumber.replaceAll(RegExp(r'[^0-9]'), '');
@@ -1595,6 +1799,15 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
               ));
             }),
             Text(title, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+            if ((data['kategori'] ?? '').toString().toLowerCase().contains('pengumuman') || data.containsKey('prioritas') || data.containsKey('tanggal'))
+              Padding(
+                padding: const EdgeInsets.only(top: 10, bottom: 8),
+                child: SizedBox(width: double.infinity, child: OutlinedButton.icon(
+                  onPressed: () => shareAnnouncementToWhatsApp(sheetContext, data),
+                  icon: const Icon(Icons.chat, color: Colors.green),
+                  label: const Text('Bagikan ke WhatsApp Group'),
+                )),
+              ),
             const SizedBox(height: 14),
             if (phone.isNotEmpty)
               ListTile(
@@ -1629,6 +1842,8 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
   );
 }
 
+String _maskNik(String nik) => nik.length == 16 ? '${nik.substring(0, 4)}********${nik.substring(12)}' : '';
+
 void showMessage(BuildContext context, String message) {
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 }
@@ -1644,7 +1859,7 @@ String authError(FirebaseAuthException e) {
     case 'user-not-found':
     case 'wrong-password':
     case 'invalid-credential':
-      return 'Email atau password salah.';
+      return 'NIK/email atau password salah. Pastikan akun sudah dibuat oleh Admin.';
     case 'network-request-failed':
       return 'Koneksi internet bermasalah.';
     case 'too-many-requests':
