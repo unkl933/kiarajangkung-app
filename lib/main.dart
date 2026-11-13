@@ -104,20 +104,55 @@ class PhotoService {
     final user = Db.auth.currentUser;
     if (user == null) throw Exception('Silakan login kembali.');
     final token = await user.getIdToken(true);
-    final request = await HttpClient().postUrl(Uri.parse(driveApiUrl));
-    request.headers.contentType = ContentType.json;
-    request.write(jsonEncode({
-      ...body,
-      'idToken': token,
-      'apiKey': Firebase.app().options.apiKey,
-      'projectId': Firebase.app().options.projectId,
-    }));
-    final response = await request.close();
-    final responseText = await response.transform(utf8.decoder).join();
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Server Google Drive (${response.statusCode}): $responseText');
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(Uri.parse(driveApiUrl));
+      request.headers.contentType = ContentType.json;
+      request.followRedirects = false;
+      request.write(jsonEncode({
+        ...body,
+        'idToken': token,
+        'apiKey': Firebase.app().options.apiKey,
+        'projectId': Firebase.app().options.projectId,
+      }));
+
+      var response = await request.close();
+
+      // Apps Script ContentService sering mengembalikan 302 ke
+      // script.googleusercontent.com setelah POST berhasil diproses.
+      // Ambil isi respons dari URL pengalihan tersebut dengan GET.
+      if ([301, 302, 303, 307, 308].contains(response.statusCode)) {
+        final location = response.headers.value(HttpHeaders.locationHeader);
+        await response.drain<void>();
+        if (location == null || location.isEmpty) {
+          throw Exception('Google Apps Script mengirim pengalihan tanpa alamat tujuan.');
+        }
+        final redirectUri = Uri.parse(driveApiUrl).resolve(location);
+        if (!['script.google.com', 'script.googleusercontent.com']
+            .contains(redirectUri.host)) {
+          throw Exception(
+            'Pengalihan Google Apps Script tidak dikenali (${redirectUri.host}). '
+            'Pastikan akses Web App disetel Anyone.',
+          );
+        }
+        final redirectedRequest = await client.getUrl(redirectUri);
+        response = await redirectedRequest.close();
+      }
+
+      final responseText = await response.transform(utf8.decoder).join();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Server Google Drive (${response.statusCode}): $responseText');
+      }
+      final decoded = jsonDecode(responseText);
+      if (decoded is! Map<String, dynamic> || decoded['ok'] != true) {
+        throw Exception(decoded is Map
+            ? (decoded['error'] ?? 'Gagal memproses foto')
+            : 'Respons Google Drive tidak valid.');
+      }
+      return decoded;
+    } finally {
+      client.close(force: true);
     }
-    final decoded = jsonDecode(responseText);
     if (decoded is! Map<String, dynamic> || decoded['ok'] != true) {
       throw Exception(decoded is Map ? (decoded['error'] ?? 'Gagal memproses foto') : 'Respons Google Drive tidak valid.');
     }
