@@ -153,10 +153,6 @@ class PhotoService {
     } finally {
       client.close(force: true);
     }
-    if (decoded is! Map<String, dynamic> || decoded['ok'] != true) {
-      throw Exception(decoded is Map ? (decoded['error'] ?? 'Gagal memproses foto') : 'Respons Google Drive tidak valid.');
-    }
-    return decoded;
   }
 
   static Future<String> upload(Uint8List bytes, String moduleKey) async {
