@@ -2414,14 +2414,128 @@ class InformasiDiriPage extends StatefulWidget {
 }
 class _InformasiDiriPageState extends State<InformasiDiriPage>{
   static const locked={'nama','nik','noKK','role','roles','wargaId','accountUid','createdAt','createdBy','updatedAt','updatedBy','akunStatus'};
-  Future<void> edit(Map<String,dynamic> data,String wargaId) async {
-    final editable=data.entries.where((e)=>!locked.contains(e.key)&&e.value is String).toList();
-    final controllers={for(final e in editable)e.key:TextEditingController(text:e.value.toString())};
-    final labels={'jenisKelamin':'Jenis kelamin','tempatLahir':'Tempat lahir','tanggalLahir':'Tanggal lahir','telepon':'Nomor HP / WhatsApp','agama':'Agama','statusPerkawinan':'Status perkawinan','pendidikan':'Pendidikan','pekerjaan':'Pekerjaan','hubunganKeluarga':'Hubungan keluarga','kawil':'Kawil / Dusun','rw':'RW','rt':'RT','alamat':'Alamat'};
-    bool busy=false;
-    await showModalBottomSheet(context:context,isScrollControlled:true,builder:(ctx)=>StatefulBuilder(builder:(ctx,setSheet)=>Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx).viewInsets.bottom),child:Column(mainAxisSize:MainAxisSize.min,children:[Padding(padding:const EdgeInsets.all(16),child:Text('Perbarui Informasi Diri',style:Theme.of(ctx).textTheme.titleLarge)),Flexible(child:ListView(shrinkWrap:true,padding:const EdgeInsets.all(16),children:editable.map((e)=>Padding(padding:const EdgeInsets.only(bottom:10),child:TextField(controller:controllers[e.key],maxLines:1,decoration:InputDecoration(labelText:labels[e.key]??e.key))).toList())),),Padding(padding:const EdgeInsets.all(16),child:FilledButton(onPressed:busy?null:()async{setSheet(()=>busy=true);try{final changes=<String,dynamic>{for(final e in controllers.entries)e.key:e.value.text.trim(),'updatedAt':FieldValue.serverTimestamp()};await Db.module('sensus').doc(wargaId).update(changes);if(ctx.mounted)Navigator.pop(ctx);if(context.mounted)showMessage(context,'Informasi diri berhasil diperbarui.');}catch(e){if(context.mounted)showMessage(context,'Gagal memperbarui data: $e');}finally{if(ctx.mounted)setSheet(()=>busy=false);}},child:busy?const CircularProgressIndicator():const Text('Simpan Perubahan')))]))));
-    for(final c in controllers.values){c.dispose();}
+  Future<void> edit(Map<String, dynamic> data, String wargaId) async {
+    final editable = data.entries
+        .where((e) => !locked.contains(e.key) && e.value is String)
+        .toList();
+
+    final controllers = <String, TextEditingController>{
+      for (final e in editable)
+        e.key: TextEditingController(text: e.value.toString()),
+    };
+
+    final labels = <String, String>{
+      'jenisKelamin': 'Jenis kelamin',
+      'tempatLahir': 'Tempat lahir',
+      'tanggalLahir': 'Tanggal lahir',
+      'telepon': 'Nomor HP / WhatsApp',
+      'agama': 'Agama',
+      'statusPerkawinan': 'Status perkawinan',
+      'pendidikan': 'Pendidikan',
+      'pekerjaan': 'Pekerjaan',
+      'hubunganKeluarga': 'Hubungan keluarga',
+      'kawil': 'Kawil / Dusun',
+      'rw': 'RW',
+      'rt': 'RT',
+      'alamat': 'Alamat',
+    };
+
+    bool busy = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      'Perbarui Informasi Diri',
+                      style: Theme.of(ctx).textTheme.titleLarge,
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.all(16),
+                      children: editable.map<Widget>((e) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: TextField(
+                            controller: controllers[e.key],
+                            maxLines: 1,
+                            decoration: InputDecoration(
+                              labelText: labels[e.key] ?? e.key,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: FilledButton(
+                      onPressed: busy
+                          ? null
+                          : () async {
+                              setSheet(() => busy = true);
+                              try {
+                                final changes = <String, dynamic>{
+                                  for (final e in controllers.entries)
+                                    e.key: e.value.text.trim(),
+                                  'updatedAt': FieldValue.serverTimestamp(),
+                                };
+                                await Db.module('sensus')
+                                    .doc(wargaId)
+                                    .update(changes);
+                                if (ctx.mounted) {
+                                  Navigator.pop(ctx);
+                                }
+                                if (context.mounted) {
+                                  showMessage(
+                                    context,
+                                    'Informasi diri berhasil diperbarui.',
+                                  );
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  showMessage(
+                                    context,
+                                    'Gagal memperbarui data: $e',
+                                  );
+                                }
+                              } finally {
+                                if (ctx.mounted) {
+                                  setSheet(() => busy = false);
+                                }
+                              }
+                            },
+                      child: busy
+                          ? const CircularProgressIndicator()
+                          : const Text('Simpan Perubahan'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    for (final controller in controllers.values) {
+      controller.dispose();
+    }
   }
+
   @override Widget build(BuildContext context){final user=Db.auth.currentUser; if(user==null)return const Scaffold(body:Center(child:Text('Silakan login kembali.')));return Scaffold(appBar:AppBar(title:const Text('Informasi Diri')),body:StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.user(user.uid).snapshots(),builder:(context,userSnap){if(!userSnap.hasData)return const Center(child:CircularProgressIndicator());final profile=userSnap.data!.data()??{};final wargaId=(profile['wargaId']??'').toString();if(wargaId.isEmpty)return const Center(child:Padding(padding:EdgeInsets.all(24),child:Text('Akun ini belum terhubung dengan data Sensus. Silakan hubungi Admin/Owner.')));return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.module('sensus').doc(wargaId).snapshots(),builder:(context,snap){if(snap.hasError)return Center(child:Text('Gagal memuat Sensus: ${snap.error}'));if(!snap.hasData)return const Center(child:CircularProgressIndicator());final data=snap.data!.data();if(data==null)return const Center(child:Text('Data Sensus milik akun ini tidak ditemukan.'));final entries=data.entries.where((e)=>!{'roles','role','accountUid','wargaId','createdAt','createdBy','updatedAt','updatedBy'}.contains(e.key));final roles=(profile['roles'] is List)?(profile['roles'] as List).join(', '):(profile['role']??'warga').toString();return ListView(padding:const EdgeInsets.all(16),children:[Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFFEAF4ED),borderRadius:BorderRadius.circular(16)),child:const Text('Data ini terhubung langsung dengan Sensus Penduduk. Nama asli, NIK, Nomor KK, dan Role dikunci untuk menjaga keakuratan identitas.')),const SizedBox(height:12),Card(child:ListTile(title:const Text('Role / Hak Akses'),subtitle:Text(roles),trailing:const Icon(Icons.lock_outline))),...entries.map((e){final isLocked={'nama','nik','noKK'}.contains(e.key);final labels={'nama':'Nama Asli','nik':'NIK','noKK':'Nomor KK','jenisKelamin':'Jenis kelamin','tempatLahir':'Tempat lahir','tanggalLahir':'Tanggal lahir','telepon':'Nomor HP / WhatsApp','agama':'Agama','statusPerkawinan':'Status perkawinan','pendidikan':'Pendidikan','pekerjaan':'Pekerjaan','hubunganKeluarga':'Hubungan keluarga','kawil':'Kawil / Dusun','rw':'RW','rt':'RT','alamat':'Alamat'};return Card(child:ListTile(title:Text(labels[e.key]??e.key),subtitle:Text(e.value.toString().isEmpty?'Belum diisi':e.value.toString()),trailing:isLocked?const Icon(Icons.lock_outline,size:18):null));}),const SizedBox(height:12),FilledButton.icon(onPressed:()=>edit(data,wargaId),icon:const Icon(Icons.edit_outlined),label:const Text('Edit / Perbarui Data'))]);});}));}
 }
 
