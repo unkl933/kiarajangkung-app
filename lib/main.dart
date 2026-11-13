@@ -1864,6 +1864,8 @@ class ModulePage extends StatelessWidget {
             return const Center(child: Text('Belum ada data. Informasi akan ditampilkan di sini.'));
           }
           return ListView.builder(
+            primary: true,
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
             itemCount: snapshot.data!.docs.length,
             itemBuilder: (context, index) {
@@ -2953,6 +2955,7 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
       child: Padding(
         padding: const EdgeInsets.all(22),
         child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             Builder(builder: (context) {
               final photo = (data['fotoUrl'] ?? data['foto'] ?? data['imageUrl'] ?? '').toString().trim();
@@ -2974,7 +2977,20 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
                 )),
               ),
             const SizedBox(height: 14),
-            if (phone.isNotEmpty)
+            if (phone.isNotEmpty) ...[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.call, color: Color(0xFF21865D)),
+                title: const Text('Telepon kontak ini'),
+                subtitle: Text(phone),
+                onTap: () async {
+                  final dialNumber = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+                  final dialUri = Uri(scheme: 'tel', path: dialNumber);
+                  if (!await launchUrl(dialUri, mode: LaunchMode.externalApplication) && sheetContext.mounted) {
+                    showMessage(sheetContext, 'Tidak dapat membuka aplikasi telepon.');
+                  }
+                },
+              ),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.chat, color: Colors.green),
@@ -2982,6 +2998,7 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
                 subtitle: Text(phone),
                 onTap: () => openWhatsApp(sheetContext, phone),
               ),
+            ],
             if (maps.isNotEmpty || address.isNotEmpty)
               ListTile(
                 contentPadding: EdgeInsets.zero,
