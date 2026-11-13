@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -351,6 +354,8 @@ const modules = <ModuleInfo>[
   ModuleInfo('sarana', 'Sarana & Prasarana', 'Fasilitas umum kampung', Icons.domain_outlined),
   ModuleInfo('wisata', 'Wisata Kampung', 'Destinasi dan potensi wisata', Icons.park_outlined),
   ModuleInfo('kesenian', 'Kesenian & Budaya', 'Sanggar, paguron dan seni tradisi', Icons.theater_comedy_outlined),
+  ModuleInfo('kebersihan', 'Kebersihan', 'Jadwal pengangkutan sampah setiap Jumat pagi', Icons.cleaning_services_outlined),
+  ModuleInfo('fasilitas_kesehatan', 'Fasilitas Kesehatan', 'Klinik, puskesmas dan apotek', Icons.local_hospital_outlined),
 ];
 
 class HomePage extends StatefulWidget {
@@ -428,6 +433,10 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
+        const SizedBox(height: 16),
+        const DashboardAnnouncements(),
+        const SizedBox(height: 18),
+        const DashboardGallery(),
         const SizedBox(height: 22),
         Text('Ringkasan Kampung', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
@@ -482,6 +491,164 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class DashboardAnnouncements extends StatelessWidget {
+  const DashboardAnnouncements({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: Db.module('pengumuman').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError || !snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final items = snapshot.data!.docs.map((d) => d.data()).where((d) {
+          final status = (d['status'] ?? 'aktif').toString().toLowerCase();
+          return status != 'nonaktif' && status != 'arsip';
+        }).toList();
+        if (items.isEmpty) return const SizedBox.shrink();
+        final message = items.map((d) {
+          final title = (d['judul'] ?? d['nama'] ?? 'Pengumuman').toString();
+          final detail = (d['deskripsi'] ?? d['keterangan'] ?? '').toString();
+          return detail.trim().isEmpty ? title : '$title: $detail';
+        }).join('     •     ');
+        return Container(
+          height: 54,
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF1CC),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFFFD778)),
+          ),
+          child: Row(children: [
+            Container(
+              height: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFD778),
+                borderRadius: BorderRadius.horizontal(left: Radius.circular(13)),
+              ),
+              child: const Icon(Icons.campaign_rounded, color: Color(0xFF704900)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: _MarqueeText(text: message)),
+          ]),
+        );
+      },
+    );
+  }
+}
+
+class _MarqueeText extends StatefulWidget {
+  final String text;
+  const _MarqueeText({required this.text});
+  @override
+  State<_MarqueeText> createState() => _MarqueeTextState();
+}
+
+class _MarqueeTextState extends State<_MarqueeText> with SingleTickerProviderStateMixin {
+  late final AnimationController controller;
+  @override
+  void initState() {
+    super.initState();
+    controller = AnimationController(vsync: this, duration: Duration(seconds: (widget.text.length ~/ 8).clamp(12, 35).toInt()))..repeat();
+  }
+  @override
+  void didUpdateWidget(covariant _MarqueeText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text) controller.duration = Duration(seconds: (widget.text.length ~/ 8).clamp(12, 35).toInt());
+  }
+  @override
+  void dispose() { controller.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) => ClipRect(
+    child: LayoutBuilder(builder: (context, constraints) => AnimatedBuilder(
+      animation: controller,
+      builder: (_, __) => Transform.translate(
+        offset: Offset(constraints.maxWidth - (constraints.maxWidth + widget.text.length * 7.0) * controller.value, 0),
+        child: Align(alignment: Alignment.centerLeft, child: Text(widget.text, maxLines: 1, softWrap: false, style: const TextStyle(color: Color(0xFF704900), fontWeight: FontWeight.w600))),
+      ),
+    )),
+  );
+}
+
+class DashboardGallery extends StatefulWidget {
+  const DashboardGallery({super.key});
+  @override
+  State<DashboardGallery> createState() => _DashboardGalleryState();
+}
+
+class _DashboardGalleryState extends State<DashboardGallery> {
+  final PageController pageController = PageController(viewportFraction: 1);
+  Timer? timer;
+  int current = 0;
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> photos = [];
+
+  void startSlide() {
+    timer?.cancel();
+    if (photos.length < 2) return;
+    timer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted || !pageController.hasClients || photos.isEmpty) return;
+      current = (current + 1) % photos.length;
+      pageController.animateToPage(current, duration: const Duration(milliseconds: 450), curve: Curves.easeInOut);
+    });
+  }
+
+  @override
+  void dispose() { timer?.cancel(); pageController.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: Db.module('galeri').orderBy('updatedAt', descending: true).snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError || !snapshot.hasData) return const SizedBox.shrink();
+        photos = snapshot.data!.docs.where((doc) {
+          final d = doc.data();
+          final url = (d['fotoUrl'] ?? d['foto'] ?? d['imageUrl'] ?? '').toString().trim();
+          return url.startsWith('https://') || url.startsWith('http://');
+        }).toList();
+        if (photos.isEmpty) return const SizedBox.shrink();
+        WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) startSlide(); });
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Kegiatan Warga', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: SizedBox(
+              height: 190,
+              child: PageView.builder(
+                controller: pageController,
+                itemCount: photos.length,
+                onPageChanged: (v) => setState(() => current = v),
+                itemBuilder: (context, index) {
+                  final data = photos[index].data();
+                  final url = (data['fotoUrl'] ?? data['foto'] ?? data['imageUrl']).toString();
+                  final title = (data['judul'] ?? data['nama'] ?? 'Kegiatan warga').toString();
+                  return Stack(fit: StackFit.expand, children: [
+                    Image.network(url, fit: BoxFit.cover, errorBuilder: (_, __, ___) => Container(color: Colors.grey.shade300, child: const Icon(Icons.broken_image_outlined, size: 42))),
+                    Positioned(left: 0, right: 0, bottom: 0, child: Container(
+                      padding: const EdgeInsets.fromLTRB(14, 22, 14, 12),
+                      decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.transparent, Colors.black87])),
+                      child: Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                    )),
+                  ]);
+                },
+              ),
+            ),
+          ),
+          if (photos.length > 1) ...[
+            const SizedBox(height: 8),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(photos.length, (i) => Container(
+              width: current == i ? 18 : 7, height: 7, margin: const EdgeInsets.symmetric(horizontal: 3),
+              decoration: BoxDecoration(color: current == i ? Theme.of(context).colorScheme.primary : Colors.grey.shade400, borderRadius: BorderRadius.circular(8)),
+            ))),
+          ],
+        ]);
+      },
     );
   }
 }
@@ -607,6 +774,168 @@ class ModulePage extends StatelessWidget {
   }
 }
 
+
+class ModuleField {
+  final String key;
+  final String label;
+  final String hint;
+  final int lines;
+  final TextInputType keyboard;
+  final bool required;
+  const ModuleField(this.key, this.label, {
+    this.hint = '',
+    this.lines = 1,
+    this.keyboard = TextInputType.text,
+    this.required = false,
+  });
+}
+
+List<ModuleField> fieldsForModule(String key) {
+  switch (key) {
+    case 'profil_kampung':
+      return const [
+        ModuleField('sejarah', 'Sejarah kampung', lines: 4),
+        ModuleField('visi', 'Visi', lines: 2),
+        ModuleField('misi', 'Misi', lines: 4),
+        ModuleField('batasWilayah', 'Batas wilayah', lines: 3),
+        ModuleField('luasWilayah', 'Luas wilayah'),
+        ModuleField('jumlahPenduduk', 'Jumlah penduduk', keyboard: TextInputType.number),
+        ModuleField('fotoUrl', 'URL foto profil', hint: 'https://...'),
+      ];
+    case 'pengumuman':
+      return const [
+        ModuleField('kategori', 'Kategori', hint: 'Umum / Kegiatan / Penting'),
+        ModuleField('deskripsi', 'Isi pengumuman', lines: 5, required: true),
+        ModuleField('tanggal', 'Tanggal kegiatan', hint: 'Contoh: 20-11-2026'),
+        ModuleField('waktu', 'Waktu', hint: 'Contoh: 08.00 WIB'),
+        ModuleField('lokasi', 'Lokasi kegiatan'),
+        ModuleField('prioritas', 'Prioritas', hint: 'Normal / Penting / Mendesak'),
+        ModuleField('status', 'Status', hint: 'aktif / nonaktif / arsip'),
+        ModuleField('fotoUrl', 'URL foto/lampiran', hint: 'https://...'),
+      ];
+    case 'galeri':
+      return const [
+        ModuleField('kategori', 'Kategori foto', hint: 'Kegiatan / Pembangunan / Budaya'),
+        ModuleField('tanggal', 'Tanggal kegiatan'),
+        ModuleField('deskripsi', 'Keterangan foto', lines: 3),
+        ModuleField('fotoUrl', 'URL foto', hint: 'https://...', required: true),
+        ModuleField('videoUrl', 'URL video (opsional)', hint: 'https://...'),
+      ];
+    case 'sensus':
+      return const [
+        ModuleField('noKK', 'Nomor Kartu Keluarga', keyboard: TextInputType.number),
+        ModuleField('nik', 'NIK', keyboard: TextInputType.number, required: true),
+        ModuleField('jenisKelamin', 'Jenis kelamin', hint: 'Laki-laki / Perempuan'),
+        ModuleField('tempatLahir', 'Tempat lahir'),
+        ModuleField('tanggalLahir', 'Tanggal lahir', hint: 'DD-MM-YYYY'),
+        ModuleField('statusPerkawinan', 'Status perkawinan'),
+        ModuleField('pendidikan', 'Pendidikan'),
+        ModuleField('pekerjaan', 'Pekerjaan'),
+        ModuleField('hubunganKeluarga', 'Hubungan dalam keluarga'),
+        ModuleField('rt', 'RT'),
+        ModuleField('rw', 'RW'),
+      ];
+    case 'perangkat':
+      return const [
+        ModuleField('jabatan', 'Jabatan', required: true),
+        ModuleField('wilayah', 'Wilayah tugas', hint: 'Dusun / RW / RT'),
+        ModuleField('telepon', 'Nomor WhatsApp', keyboard: TextInputType.phone),
+        ModuleField('alamat', 'Alamat'),
+        ModuleField('periode', 'Periode jabatan'),
+        ModuleField('fotoUrl', 'URL foto', hint: 'https://...'),
+      ];
+    case 'ronda':
+      return const [
+        ModuleField('rt', 'RT'),
+        ModuleField('rw', 'RW'),
+        ModuleField('hari', 'Hari ronda', required: true),
+        ModuleField('jamMulai', 'Jam mulai', hint: '21.00'),
+        ModuleField('jamSelesai', 'Jam selesai', hint: '04.00'),
+        ModuleField('anggota', 'Nama anggota / petugas', lines: 4),
+        ModuleField('catatan', 'Catatan', lines: 2),
+      ];
+    case 'kontak_darurat':
+      return const [
+        ModuleField('kategori', 'Jenis layanan', hint: 'Babinsa / Bhabinkamtibmas / Ambulans'),
+        ModuleField('telepon', 'Nomor WhatsApp/telepon', keyboard: TextInputType.phone, required: true),
+        ModuleField('alamat', 'Alamat'),
+        ModuleField('lokasiMaps', 'Link Google Maps', hint: 'https://maps.google.com/...'),
+        ModuleField('catatan', 'Keterangan layanan', lines: 3),
+      ];
+    case 'umkm':
+      return const [
+        ModuleField('pemilik', 'Nama pemilik', required: true),
+        ModuleField('jenisUsaha', 'Jenis usaha'),
+        ModuleField('produk', 'Produk / jasa', lines: 3),
+        ModuleField('alamat', 'Alamat usaha'),
+        ModuleField('telepon', 'WhatsApp pemilik', keyboard: TextInputType.phone),
+        ModuleField('jamBuka', 'Jam operasional'),
+        ModuleField('lokasiMaps', 'Link Google Maps', hint: 'https://maps.google.com/...'),
+        ModuleField('fotoUrl', 'URL foto usaha', hint: 'https://...'),
+      ];
+    case 'sarana':
+      return const [
+        ModuleField('jenisFasilitas', 'Jenis fasilitas'),
+        ModuleField('alamat', 'Alamat / lokasi'),
+        ModuleField('lokasiMaps', 'Link Google Maps', hint: 'https://maps.google.com/...'),
+        ModuleField('kondisi', 'Kondisi', hint: 'Baik / Perlu perbaikan / Rusak'),
+        ModuleField('pengelola', 'Pengelola'),
+        ModuleField('tahunDibangun', 'Tahun dibangun', keyboard: TextInputType.number),
+        ModuleField('telepon', 'Nomor pengelola', keyboard: TextInputType.phone),
+        ModuleField('fotoUrl', 'URL foto', hint: 'https://...'),
+      ];
+    case 'wisata':
+      return const [
+        ModuleField('jenisWisata', 'Jenis wisata'),
+        ModuleField('deskripsi', 'Deskripsi daya tarik', lines: 4),
+        ModuleField('alamat', 'Alamat'),
+        ModuleField('lokasiMaps', 'Link Google Maps', hint: 'https://maps.google.com/...'),
+        ModuleField('jamBuka', 'Jam operasional'),
+        ModuleField('hargaTiket', 'Harga tiket', hint: 'Contoh: Gratis / Rp5.000'),
+        ModuleField('telepon', 'Kontak pengelola', keyboard: TextInputType.phone),
+        ModuleField('fotoUrl', 'URL foto', hint: 'https://...'),
+      ];
+    case 'kesenian':
+      return const [
+        ModuleField('jenisKesenian', 'Jenis kesenian'),
+        ModuleField('namaKelompok', 'Nama kelompok / sanggar'),
+        ModuleField('ketua', 'Ketua / pimpinan'),
+        ModuleField('telepon', 'WhatsApp', keyboard: TextInputType.phone),
+        ModuleField('alamat', 'Alamat sanggar'),
+        ModuleField('lokasiMaps', 'Link Google Maps', hint: 'https://maps.google.com/...'),
+        ModuleField('sejarah', 'Sejarah / keterangan', lines: 4),
+        ModuleField('fotoUrl', 'URL foto', hint: 'https://...'),
+        ModuleField('videoUrl', 'URL video (opsional)', hint: 'https://...'),
+      ];
+    case 'kebersihan':
+      return const [
+        ModuleField('jadwal', 'Jadwal pengangkutan', hint: 'Setiap Jumat pagi', required: true),
+        ModuleField('cakupan', 'Cakupan layanan', hint: 'Diambil langsung dari setiap rumah'),
+        ModuleField('biaya', 'Biaya per rumah per pengambilan', hint: 'Rp3.000', required: true),
+        ModuleField('petugas', 'Nama petugas'),
+        ModuleField('telepon', 'WhatsApp petugas', keyboard: TextInputType.phone),
+        ModuleField('catatan', 'Catatan layanan', lines: 3),
+      ];
+    case 'fasilitas_kesehatan':
+      return const [
+        ModuleField('jenisFasilitas', 'Jenis fasilitas', hint: 'Klinik / Puskesmas Desa / Puskesmas Kecamatan / Apotek', required: true),
+        ModuleField('alamat', 'Alamat'),
+        ModuleField('lokasiMaps', 'Link Google Maps', hint: 'https://maps.google.com/...'),
+        ModuleField('telepon', 'Nomor telepon / WhatsApp', keyboard: TextInputType.phone),
+        ModuleField('jamBuka', 'Jam pelayanan'),
+        ModuleField('layanan', 'Jenis layanan', lines: 3),
+        ModuleField('catatan', 'Catatan tambahan', lines: 2),
+      ];
+    default:
+      return const [
+        ModuleField('deskripsi', 'Keterangan', lines: 3),
+        ModuleField('alamat', 'Alamat / lokasi'),
+        ModuleField('telepon', 'Nomor WhatsApp', keyboard: TextInputType.phone),
+        ModuleField('catatan', 'Catatan tambahan', lines: 2),
+      ];
+  }
+}
+
 Future<void> showRecordForm(
   BuildContext context,
   ModuleInfo module, {
@@ -615,11 +944,14 @@ Future<void> showRecordForm(
   Map<String, dynamic>? initial,
 }) async {
   if (!isAdmin) return;
-  final title = TextEditingController(text: (initial?['judul'] ?? initial?['nama'] ?? '').toString());
-  final desc = TextEditingController(text: (initial?['deskripsi'] ?? initial?['keterangan'] ?? '').toString());
-  final address = TextEditingController(text: (initial?['alamat'] ?? '').toString());
-  final contact = TextEditingController(text: (initial?['telepon'] ?? initial?['whatsapp'] ?? '').toString());
-  final extra = TextEditingController(text: (initial?['catatan'] ?? '').toString());
+  final title = TextEditingController(
+    text: (initial?['judul'] ?? initial?['nama'] ?? initial?['nama_usaha'] ?? '').toString(),
+  );
+  final definitions = fieldsForModule(module.keyName);
+  final controllers = <String, TextEditingController>{
+    for (final field in definitions)
+      field.key: TextEditingController(text: (initial?[field.key] ?? '').toString()),
+  };
   final formKey = GlobalKey<FormState>();
   await showModalBottomSheet(
     context: context,
@@ -628,6 +960,7 @@ Future<void> showRecordForm(
     builder: (sheetContext) => Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
       child: Container(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(sheetContext).size.height * .88),
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
         decoration: const BoxDecoration(
           color: Color(0xFFF5F8F6),
@@ -648,32 +981,58 @@ Future<void> showRecordForm(
                   const SizedBox(height: 16),
                   TextFormField(
                     controller: title,
-                    validator: (v) => v == null || v.trim().isEmpty ? 'Bagian ini wajib diisi' : null,
-                    decoration: const InputDecoration(labelText: 'Nama / Judul'),
+                    validator: (v) => v == null || v.trim().isEmpty ? 'Nama/judul wajib diisi' : null,
+                    decoration: InputDecoration(
+                      labelText: module.keyName == 'sensus' ? 'Nama lengkap warga' :
+                        module.keyName == 'umkm' ? 'Nama usaha' :
+                        module.keyName == 'kebersihan' ? 'Nama layanan' :
+                        module.keyName == 'fasilitas_kesehatan' ? 'Nama fasilitas kesehatan' : 'Nama / Judul',
+                    ),
                   ),
                   const SizedBox(height: 10),
-                  TextField(controller: desc, maxLines: 3, decoration: const InputDecoration(labelText: 'Deskripsi / Keterangan')),
+                  ...definitions.map((field) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: TextFormField(
+                      controller: controllers[field.key],
+                      keyboardType: field.keyboard,
+                      maxLines: field.lines,
+                      validator: field.required
+                          ? (v) => v == null || v.trim().isEmpty ? '${field.label} wajib diisi' : null
+                          : null,
+                      decoration: InputDecoration(
+                        labelText: field.label,
+                        hintText: field.hint.isEmpty ? null : field.hint,
+                        alignLabelWithHint: field.lines > 1,
+                      ),
+                    ),
+                  )),
+                  if (module.keyName == 'pengumuman')
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Tampilkan di pengumuman berjalan'),
+                      value: (controllers['status']?.text ?? 'aktif').toLowerCase() != 'nonaktif',
+                      onChanged: (v) => setSheetState(() {
+                        controllers['status']!.text = v ? 'aktif' : 'nonaktif';
+                      }),
+                    ),
                   const SizedBox(height: 10),
-                  TextField(controller: address, decoration: const InputDecoration(labelText: 'Alamat / Lokasi')),
-                  const SizedBox(height: 10),
-                  TextField(controller: contact, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Telepon / WhatsApp')),
-                  const SizedBox(height: 10),
-                  TextField(controller: extra, maxLines: 2, decoration: const InputDecoration(labelText: 'Catatan tambahan')),
-                  const SizedBox(height: 18),
                   FilledButton(
                     onPressed: () async {
                       if (!formKey.currentState!.validate()) return;
                       final payload = <String, dynamic>{
                         'judul': title.text.trim(),
                         'nama': title.text.trim(),
-                        'deskripsi': desc.text.trim(),
-                        'keterangan': desc.text.trim(),
-                        'alamat': address.text.trim(),
-                        'telepon': contact.text.trim(),
-                        'catatan': extra.text.trim(),
+                        ...{
+                          for (final field in definitions)
+                            field.key: controllers[field.key]!.text.trim(),
+                        },
                         'updatedAt': FieldValue.serverTimestamp(),
                         'updatedBy': Db.auth.currentUser?.uid,
                       };
+                      // Field lama tetap dipertahankan agar daftar dan dashboard yang
+                      // sudah ada tetap dapat membaca data dengan format sebelumnya.
+                      payload['deskripsi'] ??= '';
+                      payload['keterangan'] ??= payload['deskripsi'];
                       try {
                         if (docId == null) {
                           payload['createdAt'] = FieldValue.serverTimestamp();
@@ -682,10 +1041,10 @@ Future<void> showRecordForm(
                         } else {
                           await Db.module(module.keyName).doc(docId).update(payload);
                         }
-                        if (context.mounted) Navigator.pop(context);
-                        showMessage(sheetContext, 'Data berhasil disimpan.');
+                        if (sheetContext.mounted) Navigator.pop(sheetContext);
+                        if (context.mounted) showMessage(context, 'Data berhasil disimpan.');
                       } catch (e) {
-                        showMessage(sheetContext, 'Gagal menyimpan: $e');
+                        if (context.mounted) showMessage(context, 'Gagal menyimpan: $e');
                       }
                     },
                     child: const Text('Simpan data'),
@@ -698,6 +1057,10 @@ Future<void> showRecordForm(
       ),
     ),
   );
+  title.dispose();
+  for (final controller in controllers.values) {
+    controller.dispose();
+  }
 }
 
 class ProfilePage extends StatelessWidget {
@@ -947,19 +1310,70 @@ Future<bool?> confirmDelete(BuildContext context) => showDialog<bool>(
       ),
     );
 
+
+Future<void> openWhatsApp(BuildContext context, String rawNumber) async {
+  var number = rawNumber.replaceAll(RegExp(r'[^0-9]'), '');
+  if (number.startsWith('0')) number = '62${number.substring(1)}';
+  if (number.startsWith('8')) number = '62$number';
+  if (number.isEmpty) {
+    showMessage(context, 'Nomor WhatsApp belum diisi.');
+    return;
+  }
+  final uri = Uri.parse('https://wa.me/$number');
+  if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+    if (context.mounted) showMessage(context, 'Tidak dapat membuka WhatsApp.');
+  }
+}
+
+Future<void> openGoogleMaps(BuildContext context, String rawLocation) async {
+  final value = rawLocation.trim();
+  if (value.isEmpty) {
+    showMessage(context, 'Link atau lokasi Google Maps belum diisi.');
+    return;
+  }
+  final uri = Uri.tryParse(value);
+  final target = (uri != null && (uri.scheme == 'https' || uri.scheme == 'http'))
+      ? uri
+      : Uri.parse('https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(value)}');
+  if (!await launchUrl(target, mode: LaunchMode.externalApplication)) {
+    if (context.mounted) showMessage(context, 'Tidak dapat membuka Google Maps.');
+  }
+}
+
 void showRecordDetail(BuildContext context, String title, Map<String, dynamic> data) {
   final excluded = {'createdAt', 'updatedAt', 'createdBy', 'updatedBy'};
+  final phone = (data['telepon'] ?? data['whatsapp'] ?? '').toString().trim();
+  final maps = (data['lokasiMaps'] ?? data['googleMaps'] ?? '').toString().trim();
+  final address = (data['alamat'] ?? data['lokasi'] ?? '').toString().trim();
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    builder: (context) => SafeArea(
+    builder: (sheetContext) => SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(22),
         child: SingleChildScrollView(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             Text(title, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 14),
-            ...data.entries.where((e) => !excluded.contains(e.key)).map((e) => Padding(
+            if (phone.isNotEmpty)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.chat, color: Colors.green),
+                title: const Text('Hubungi melalui WhatsApp'),
+                subtitle: Text(phone),
+                onTap: () => openWhatsApp(sheetContext, phone),
+              ),
+            if (maps.isNotEmpty || address.isNotEmpty)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.location_on_outlined, color: Colors.red),
+                title: const Text('Buka lokasi di Google Maps'),
+                subtitle: Text(maps.isNotEmpty ? maps : address, maxLines: 2, overflow: TextOverflow.ellipsis),
+                onTap: () => openGoogleMaps(sheetContext, maps.isNotEmpty ? maps : address),
+              ),
+            const Divider(),
+            ...data.entries.where((e) => !excluded.contains(e.key) &&
+                !{'telepon', 'whatsapp', 'lokasiMaps', 'googleMaps'}.contains(e.key)).map((e) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(e.key.replaceAll('_', ' ').toUpperCase(), style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
