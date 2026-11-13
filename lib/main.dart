@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' show FontFeature;
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -554,6 +554,7 @@ const modules = <ModuleInfo>[
   ModuleInfo('profil_kampung', 'Profil Kampung', 'Sejarah, visi, misi dan batas wilayah', Icons.account_balance_outlined),
   ModuleInfo('pengumuman', 'Pengumuman & Agenda', 'Informasi dan kegiatan warga', Icons.campaign_outlined),
   ModuleInfo('galeri', 'Galeri Kampung', 'Dokumentasi kegiatan kampung', Icons.photo_library_outlined),
+  ModuleInfo('informasi_diri', 'Informasi Diri', 'Data pribadi sesuai Sensus Penduduk', Icons.person_pin_outlined),
   ModuleInfo('sensus', 'Sensus Penduduk', 'Data keluarga dan demografi', Icons.groups_outlined, privateData: true),
   ModuleInfo('perangkat', 'Perangkat Kampung', 'Kadus, RW, RT, kader dan DKM', Icons.badge_outlined),
   ModuleInfo('ronda', 'Jadwal Ronda', 'Jadwal dan informasi siskamling', Icons.nightlight_outlined),
@@ -579,6 +580,13 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int tab = 0;
+  DateTime clockNow = DateTime.now();
+  Timer? _clockTimer;
+
+  @override
+  void initState() { super.initState(); _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) { if (mounted) setState(() => clockNow = DateTime.now()); }); }
+  @override
+  void dispose() { _clockTimer?.cancel(); super.dispose(); }
   bool get isAdmin {
     final roles = (widget.profile['roles'] is List)
         ? (widget.profile['roles'] as List).map((e) => e.toString().toLowerCase()).toSet()
@@ -591,12 +599,12 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final pages = [
       dashboard(),
-      const ModulesPage(),
+      ModulesPage(isAdmin: isAdmin),
       ProfilePage(user: widget.user, profile: widget.profile, isAdmin: isAdmin),
     ];
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Kampung Digital'),
+        title: const Text('Kampung Kiarajangkung'),
         actions: [
           if (isAdmin)
             IconButton(
@@ -649,115 +657,123 @@ class _HomePageState extends State<HomePage> {
 
   Widget dashboard() {
     final name = (widget.profile['nama'] ?? 'Warga').toString();
+    final roles = (widget.profile['roles'] is List)
+        ? (widget.profile['roles'] as List).map((e) => e.toString().toLowerCase()).toSet()
+        : <String>{(widget.profile['role'] ?? 'warga').toString().toLowerCase()};
+    roles.add('warga');
+    const roleLabels = <String, String>{
+      'perangkat_kawil':'Perangkat Kawil','ketua_rw':'Ketua RW','ketua_rt':'Ketua RT',
+      'petugas_sampah':'Petugas Sampah','pemilik_umkm':'Pemilik UMKM',
+      'pemilik_fasilitas':'Pemilik Fasilitas','ketua_organisasi':'Ketua Organisasi',
+      'ketua_dkm':'Ketua DKM','admin':'Admin','owner':'Owner'
+    };
+    final jabatan = roles.where((r) => roleLabels.containsKey(r) && r != 'pemilik_umkm')
+        .map((r) => roleLabels[r]!).toList();
+    final now = clockNow.toUtc().add(const Duration(hours: 7));
+    final dayNames = const ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'];
+    final monthNames = const ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+    final dateText = '${now.day} ${monthNames[now.month-1]} ${now.year}';
+    final timeText = '${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}:${now.second.toString().padLeft(2,'0')}';
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF105B3E), Color(0xFF239B70)],
-            ),
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(color: const Color(0xFF167C55).withOpacity(.18),
-                blurRadius: 18, offset: const Offset(0, 8)),
-            ],
+            gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+              colors: [Color(0xFF105B3E), Color(0xFF239B70)]),
+            borderRadius: BorderRadius.circular(26),
+            boxShadow: [BoxShadow(color: const Color(0xFF167C55).withOpacity(.18), blurRadius: 18, offset: const Offset(0, 8))],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                const Icon(Icons.account_balance_rounded, color: Colors.white, size: 28),
-                const SizedBox(width: 9),
-                const Expanded(child: Text('PEMERINTAH DESA KIARAJANGKUNG',
-                  style: TextStyle(color: Colors.white, fontSize: 11,
-                    fontWeight: FontWeight.w800, letterSpacing: .6))),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('👋 Wilujeng Sumping,', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 5),
+                Text(name, maxLines: 2, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 3),
+                const Text('Selamat datang di kampung kami', style: TextStyle(color: Colors.white70, fontSize: 11)),
+              ])),
+              const SizedBox(width: 8),
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text(dayNames[now.weekday-1], style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                Text(dateText, textAlign: TextAlign.right, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 3),
+                Text(timeText, style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
+                const Text('WIB', style: TextStyle(color: Colors.white70, fontSize: 10)),
               ]),
-              const SizedBox(height: 10),
-              const Text('Wilujeng sumping 👋',
-                style: TextStyle(color: Colors.white70, fontSize: 12)),
-              const SizedBox(height: 4),
-              Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white,
-                  fontSize: 21, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              const Text('Kampung Digital Kiarajangkung',
-                style: TextStyle(color: Colors.white, fontSize: 14)),
-              const SizedBox(height: 8),
-              Container(height: 1, color: Colors.white24),
-              const SizedBox(height: 8),
-              const Text('BERSAMA MEMBANGUN DESA, MEWUJUDKAN MASYARAKAT SEJAHTERA',
-                style: TextStyle(color: Colors.white, fontSize: 10,
-                  height: 1.4, fontWeight: FontWeight.w700, letterSpacing: .35)),
+            ]),
+            if (jabatan.isNotEmpty || roles.contains('pemilik_umkm')) ...[
+              const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Divider(color: Colors.white30, height: 1)),
+              if (jabatan.isNotEmpty) ...[
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Icon(Icons.badge_outlined, color: Colors.white, size: 18), const SizedBox(width: 9),
+                  Expanded(child: Text(jabatan.join(' • '), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12))),
+                ]),
+              ],
+              if (roles.contains('pemilik_umkm')) ...[
+                if (jabatan.isNotEmpty) const SizedBox(height: 8),
+                StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
+                  stream: Db.module('umkm').where('pemilikUid', isEqualTo: widget.user.uid).snapshots(),
+                  builder: (context, snap) {
+                    final usaha = snap.data?.docs.map((d) => (d.data()['nama'] ?? d.data()['nama_usaha'] ?? d.data()['judul'] ?? 'UMKM warga').toString()).toList() ?? <String>[];
+                    final label = usaha.isNotEmpty ? usaha.join(', ') : (widget.profile['namaUsaha'] ?? 'Pemilik UMKM').toString();
+                    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Icon(Icons.storefront_outlined, color: Colors.white, size: 18), const SizedBox(width: 9),
+                      Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12))),
+                    ]);
+                  },
+                ),
+              ],
             ],
-          ),
+          ]),
         ),
+        const SizedBox(height: 12),
+        const DashboardAnnouncements(),
+        const SizedBox(height: 18),
+        const DashboardPopulationStats(),
         const SizedBox(height: 16),
         const DashboardGallery(),
         const SizedBox(height: 16),
-        const DashboardAnnouncements(),
-        const SizedBox(height: 20),
-        _DashboardSectionTitle(title: 'Layanan Cepat', action: 'Semua layanan',
-          onAction: () => setState(() => tab = 1)),
+        _DashboardSectionTitle(title: 'Layanan Cepat', action: 'Semua layanan', onAction: () => setState(() => tab = 1)),
         const SizedBox(height: 10),
         GridView.count(
-          crossAxisCount: 3,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: 9,
-          mainAxisSpacing: 9,
-          childAspectRatio: .98,
+          crossAxisCount: 3, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+          crossAxisSpacing: 9, mainAxisSpacing: 9, childAspectRatio: .98,
           children: [
-            _DashboardService(icon: Icons.emergency_rounded, title: 'Kontak Darurat',
-              color: const Color(0xFFD94B45), onTap: () => openModule('kontak_darurat')),
-            _DashboardService(icon: Icons.health_and_safety_rounded, title: 'Fasilitas Kesehatan',
-              color: const Color(0xFF26966C), onTap: () => openModule('fasilitas_kesehatan')),
-            _DashboardService(icon: Icons.account_balance_rounded, title: 'Profil Kampung',
-              color: const Color(0xFF3979B9), onTap: () => openModule('profil_kampung')),
-            _DashboardService(icon: Icons.mosque_rounded, title: 'Jadwal Sholat',
-              color: const Color(0xFF9A7A32), onTap: () => _showPrayerInfo(context)),
-            _DashboardService(icon: Icons.shield_moon_rounded, title: 'Jadwal Ronda',
-              color: const Color(0xFF586B9B), onTap: () => openModule('ronda')),
-            _DashboardService(icon: Icons.event_note_rounded, title: 'Agenda Desa',
-              color: const Color(0xFFB36A38), onTap: () => openModule('pengumuman')),
+            _DashboardService(icon: Icons.emergency_rounded, title: 'Kontak Darurat', color: const Color(0xFFD94B45), onTap: () => openModule('kontak_darurat')),
+            _DashboardService(icon: Icons.health_and_safety_rounded, title: 'Fasilitas Kesehatan', color: const Color(0xFF26966C), onTap: () => openModule('fasilitas_kesehatan')),
+            _DashboardService(icon: Icons.account_balance_rounded, title: 'Profil Kampung', color: const Color(0xFF3979B9), onTap: () => openModule('profil_kampung')),
+            _DashboardService(icon: Icons.mosque_rounded, title: 'Jadwal Sholat', color: const Color(0xFF9A7A32), onTap: () => _showPrayerInfo(context)),
+            _DashboardService(icon: Icons.shield_moon_rounded, title: 'Jadwal Ronda', color: const Color(0xFF586B9B), onTap: () => openModule('ronda')),
+            _DashboardService(icon: Icons.event_note_rounded, title: 'Agenda Desa', color: const Color(0xFFB36A38), onTap: () => openModule('pengumuman')),
           ],
         ),
-        const SizedBox(height: 16),
-        DashboardPopulationStats(isAdmin: isAdmin),
-        const SizedBox(height: 16),
-        const DashboardClock(),
-        const SizedBox(height: 10),
+        const SizedBox(height: 20),
         const DashboardPrayerSchedule(),
         const SizedBox(height: 18),
         const DashboardEmergencyPreview(),
         const SizedBox(height: 18),
         const DashboardHealthPreview(),
         const SizedBox(height: 18),
-        const DashboardRondaPreview(),
+        DashboardRondaPreview(profile: widget.profile),
         const SizedBox(height: 20),
-        _DashboardSectionTitle(title: 'Jelajahi Kampung', action: 'Lihat semua',
-          onAction: () => setState(() => tab = 1)),
+        _DashboardSectionTitle(title: 'Jelajahi Kampung', action: 'Lihat semua', onAction: () => setState(() => tab = 1)),
         const SizedBox(height: 8),
-        ...modules.where((m) => !['sensus'].contains(m.keyName)).take(8).map((m) =>
-          Card(
-            margin: const EdgeInsets.only(bottom: 7),
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-                child: Icon(m.icon),
-              ),
-              title: Text(m.title, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(m.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => openModule(m.keyName),
-            ),
-          )),
+        ...modules.where((m) => !['sensus'].contains(m.keyName)).take(9).map((m) => Card(
+          margin: const EdgeInsets.only(bottom: 7),
+          child: ListTile(
+            leading: CircleAvatar(backgroundColor: Theme.of(context).colorScheme.primaryContainer, child: Icon(m.icon)),
+            title: Text(m.title, style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text(m.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+            trailing: const Icon(Icons.chevron_right), onTap: () => openModule(m.keyName),
+          ),
+        )),
       ],
     );
   }
+
 }
 
 
@@ -862,104 +878,43 @@ class _DashboardPrayerScheduleState extends State<DashboardPrayerSchedule> {
   );
 }
 
-String _cleanPhone(String raw) => raw.replaceAll(RegExp(r'[^0-9+]'), '');
-
-String _whatsAppNumber(String raw) {
-  var n = raw.replaceAll(RegExp(r'[^0-9]'), '');
-  if (n.startsWith('0')) n = '62${n.substring(1)}';
-  if (n.startsWith('8')) n = '62$n';
-  if (n.startsWith('620')) n = '62${n.substring(3)}';
-  return n;
-}
-
-Future<void> _dialNumber(BuildContext context, String raw) async {
-  final phone = _cleanPhone(raw);
-  if (phone.isEmpty) { showMessage(context, 'Nomor telepon belum tersedia.'); return; }
-  final uri = Uri(scheme: 'tel', path: phone);
-  try {
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && context.mounted) showMessage(context, 'Aplikasi telepon tidak dapat dibuka.');
-  } catch (_) {
-    if (context.mounted) showMessage(context, 'Aplikasi telepon tidak dapat dibuka.');
-  }
-}
-
-Future<void> _openWhatsApp(BuildContext context, String raw) async {
-  final phone = _whatsAppNumber(raw);
-  if (phone.isEmpty) { showMessage(context, 'Nomor WhatsApp belum tersedia.'); return; }
-  final uri = Uri.parse('https://wa.me/$phone');
-  try {
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && context.mounted) showMessage(context, 'WhatsApp tidak dapat dibuka.');
-  } catch (_) {
-    if (context.mounted) showMessage(context, 'WhatsApp tidak dapat dibuka.');
-  }
-}
-
-void _showContactDetails(BuildContext context, Map<String, dynamic> data, {required bool health}) {
-  final title = (data['judul'] ?? data['nama'] ?? data['kategori'] ?? data['jenisFasilitas'] ?? (health ? 'Fasilitas kesehatan' : 'Kontak darurat')).toString();
-  final phone = (data['telepon'] ?? '').toString();
-  final address = (data['alamat'] ?? '').toString();
-  final description = (data['catatan'] ?? data['layanan'] ?? data['deskripsi'] ?? '').toString();
-  final hours = (data['jamBuka'] ?? '').toString();
-  final maps = (data['lokasiMaps'] ?? '').toString();
-  showDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
-    title: Text(title),
-    content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (address.isNotEmpty) _detailLine(Icons.location_on_outlined, address),
-      if (phone.isNotEmpty) _detailLine(Icons.phone_outlined, phone),
-      if (hours.isNotEmpty) _detailLine(Icons.access_time, hours),
-      if (description.isNotEmpty) _detailLine(Icons.info_outline, description),
-      if (maps.isNotEmpty) _detailLine(Icons.map_outlined, 'Lokasi tersedia di Google Maps'),
-    ])),
-    actions: [
-      if (maps.isNotEmpty) TextButton.icon(onPressed: () async {
-        final uri = Uri.tryParse(maps) ?? Uri.https('www.google.com', '/maps/search/', {'api': '1', 'query': address});
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }, icon: const Icon(Icons.map_outlined), label: const Text('Peta')),
-      if (phone.isNotEmpty) TextButton.icon(onPressed: () => _dialNumber(context, phone), icon: const Icon(Icons.call), label: const Text('Telepon')),
-      if (phone.isNotEmpty) FilledButton.icon(onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat), label: const Text('WhatsApp')),
-    ],
-  ));
-}
-
-Widget _detailLine(IconData icon, String text) => Padding(
-  padding: const EdgeInsets.only(bottom: 10),
-  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(icon, size: 18, color: const Color(0xFF21865D)), const SizedBox(width: 9), Expanded(child: Text(text))]),
-);
-
 class DashboardEmergencyPreview extends StatelessWidget {
   const DashboardEmergencyPreview({super.key});
+
   @override
   Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-    stream: Db.module('kontak_darurat').snapshots(),
+    stream: Db.module('kontak_darurat').limit(3).snapshots(),
     builder: (context, snapshot) {
       if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
       final docs = snapshot.data!.docs;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const _DashboardSectionTitle(title: 'Kontak Darurat'),
-        SizedBox(height: 150, child: ListView.separated(
-          scrollDirection: Axis.horizontal, itemCount: docs.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 8),
-          itemBuilder: (context, i) {
-            final d = docs[i].data();
-            final title = (d['judul'] ?? d['nama'] ?? d['kategori'] ?? 'Layanan darurat').toString();
-            final phone = (d['telepon'] ?? '').toString();
-            return SizedBox(width: 245, child: Card(child: InkWell(
-              borderRadius: BorderRadius.circular(18),
-              onTap: () => _showContactDetails(context, d, health: false),
-              child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [const CircleAvatar(backgroundColor: Color(0xFFFFE8E6), child: Icon(Icons.emergency, color: Color(0xFFD94B45))), const SizedBox(width: 9), Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700))) ]),
-                const Spacer(), Text(phone.isEmpty ? 'Nomor belum tersedia' : phone, style: const TextStyle(fontSize: 12)),
-                const SizedBox(height: 5), Row(children: [
-                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'Telepon', onPressed: () => _dialNumber(context, phone), icon: const Icon(Icons.call, color: Color(0xFF21865D))),
-                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'WhatsApp', onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat, color: Color(0xFF21865D))),
-                  const Spacer(), const Text('Detail', style: TextStyle(fontSize: 11, color: Color(0xFF21865D))),
-                ]),
-              ])),
-            )));
-          },
-        )),
+        ...docs.map((doc) {
+          final d = doc.data();
+          final title = (d['judul'] ?? d['nama'] ?? d['kategori'] ?? 'Layanan darurat').toString();
+          final phone = (d['telepon'] ?? '').toString().trim();
+          return Card(
+            margin: const EdgeInsets.only(bottom: 7),
+            child: ListTile(
+              leading: const CircleAvatar(backgroundColor: Color(0xFFFFE8E6),
+                child: Icon(Icons.phone_in_talk, color: Color(0xFFD94B45))),
+              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(phone.isEmpty ? 'Nomor belum tersedia' : phone),
+              trailing: phone.isEmpty ? null : IconButton(
+                tooltip: 'Telepon',
+                icon: const Icon(Icons.call, color: Color(0xFF21865D)),
+                onPressed: () async {
+                  final uri = Uri(scheme: 'tel', path: phone.replaceAll(RegExp(r'[^0-9+]'), ''));
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri);
+                  } else if (context.mounted) {
+                    showMessage(context, 'Tidak dapat membuka aplikasi telepon.');
+                  }
+                },
+              ),
+            ),
+          );
+        }),
       ]);
     },
   );
@@ -967,137 +922,34 @@ class DashboardEmergencyPreview extends StatelessWidget {
 
 class DashboardHealthPreview extends StatelessWidget {
   const DashboardHealthPreview({super.key});
+
   @override
   Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-    stream: Db.module('fasilitas_kesehatan').snapshots(),
+    stream: Db.module('fasilitas_kesehatan').limit(2).snapshots(),
     builder: (context, snapshot) {
       if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
-      final docs = snapshot.data!.docs;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const _DashboardSectionTitle(title: 'Fasilitas Kesehatan'),
-        SizedBox(height: 166, child: ListView.separated(
-          scrollDirection: Axis.horizontal, itemCount: docs.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 8),
-          itemBuilder: (context, i) {
-            final d = docs[i].data();
-            final title = (d['judul'] ?? d['nama'] ?? d['jenisFasilitas'] ?? 'Fasilitas kesehatan').toString();
-            final address = (d['alamat'] ?? '').toString();
-            final phone = (d['telepon'] ?? '').toString();
-            return SizedBox(width: 255, child: Card(child: InkWell(
-              borderRadius: BorderRadius.circular(18),
-              onTap: () => _showContactDetails(context, d, health: true),
-              child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [const CircleAvatar(backgroundColor: Color(0xFFE4F3EB), child: Icon(Icons.health_and_safety, color: Color(0xFF21865D))), const SizedBox(width: 9), Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)))]),
-                const SizedBox(height: 8), Expanded(child: Text(address.isEmpty ? 'Alamat belum tersedia' : address, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11))),
-                Row(children: [
-                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'Telepon', onPressed: () => _dialNumber(context, phone), icon: const Icon(Icons.call, color: Color(0xFF21865D))),
-                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'WhatsApp', onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat, color: Color(0xFF21865D))),
-                  const Spacer(), const Text('Detail', style: TextStyle(fontSize: 11, color: Color(0xFF21865D))),
-                ]),
-              ])),
-            )));
-          },
-        )),
+        ...snapshot.data!.docs.map((doc) {
+          final d = doc.data();
+          final title = (d['judul'] ?? d['nama'] ?? d['jenisFasilitas'] ?? 'Fasilitas kesehatan').toString();
+          final address = (d['alamat'] ?? '').toString();
+          final hours = (d['jamBuka'] ?? '').toString();
+          return Card(
+            margin: const EdgeInsets.only(bottom: 7),
+            child: ListTile(
+              leading: const CircleAvatar(backgroundColor: Color(0xFFE4F3EB),
+                child: Icon(Icons.health_and_safety, color: Color(0xFF21865D))),
+              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text([address, hours].where((v) => v.trim().isNotEmpty).join(' • '),
+                maxLines: 2, overflow: TextOverflow.ellipsis),
+            ),
+          );
+        }),
       ]);
     },
   );
 }
-
-class DashboardClock extends StatefulWidget {
-  const DashboardClock({super.key});
-  @override
-  State<DashboardClock> createState() => _DashboardClockState();
-}
-class _DashboardClockState extends State<DashboardClock> {
-  late DateTime now;
-  Timer? timer;
-  static const months = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
-  static const days = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'];
-  @override
-  void initState() { super.initState(); now = DateTime.now().toUtc().add(const Duration(hours: 7)); timer = Timer.periodic(const Duration(seconds: 1), (_) { if (mounted) setState(() => now = DateTime.now().toUtc().add(const Duration(hours: 7))); }); }
-  @override
-  void dispose() { timer?.cancel(); super.dispose(); }
-  @override
-  Widget build(BuildContext context) {
-    final date = '${days[now.weekday - 1]}, ${now.day} ${months[now.month - 1]} ${now.year}';
-    final time = '${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}:${now.second.toString().padLeft(2,'0')}';
-    return Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFE4ECE6))), child: Row(children: [
-      const Icon(Icons.access_time_filled, color: Color(0xFF167C55), size: 28), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(date, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)), const Text('Waktu Indonesia Barat (WIB)', style: TextStyle(fontSize: 10, color: Colors.black54))])), Text(time, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
-    ]));
-  }
-}
-
-class DashboardPopulationStats extends StatefulWidget {
-  final bool isAdmin;
-  const DashboardPopulationStats({super.key, required this.isAdmin});
-  @override
-  State<DashboardPopulationStats> createState() => _DashboardPopulationStatsState();
-}
-class _DashboardPopulationStatsState extends State<DashboardPopulationStats> {
-  String? _lastPublished;
-  DocumentReference<Map<String, dynamic>> get _summaryRef => Db.module('statistik_penduduk').doc('ringkasan');
-
-  Widget _renderStats(BuildContext context, int total, int male, int female, int kk) {
-    final malePct = total == 0 ? 0.0 : male / total;
-    final femalePct = total == 0 ? 0.0 : female / total;
-    return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      const Text('Statistik Penduduk', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-      const SizedBox(height: 4), const Text('Diperbarui otomatis dari Data Sensus Penduduk', style: TextStyle(fontSize: 10, color: Colors.black54)),
-      const SizedBox(height: 12), Row(children: [
-        Expanded(child: _populationRing('Laki-laki', male, malePct, const Color(0xFF3979B9))),
-        Expanded(child: _populationRing('Perempuan', female, femalePct, const Color(0xFFD66A91))),
-      ]),
-      const Divider(height: 20), Row(children: [
-        Expanded(child: _populationNumber('Total penduduk', total, Icons.groups_outlined)),
-        Expanded(child: _populationNumber('Total KK', kk, Icons.home_work_outlined)),
-      ]),
-      Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () => showDialog<void>(context: context, builder: (ctx) => AlertDialog(title: const Text('Rincian Penduduk'), content: Text('Total penduduk: $total jiwa\nLaki-laki: $male jiwa (${(malePct * 100).toStringAsFixed(1)}%)\nPerempuan: $female jiwa (${(femalePct * 100).toStringAsFixed(1)}%)\nTotal kepala keluarga: $kk KK'), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Tutup'))])), child: const Text('Lihat rincian'))),
-    ])));
-  }
-
-  Map<String, int> _count(Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
-    final list = docs.toList();
-    final male = list.where((d) => ['laki-laki','laki laki','l','pria'].contains((d.data()['jenisKelamin'] ?? '').toString().trim().toLowerCase())).length;
-    final female = list.where((d) => ['perempuan','wanita','p'].contains((d.data()['jenisKelamin'] ?? '').toString().trim().toLowerCase())).length;
-    final kk = list.map((d) => (d.data()['noKK'] ?? '').toString().trim()).where((v) => v.isNotEmpty).toSet().length;
-    return {'total': list.length, 'male': male, 'female': female, 'kk': kk};
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (widget.isAdmin) {
-      return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: Db.module('sensus').snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) return const SizedBox.shrink();
-          if (!snapshot.hasData) return const Center(child: Padding(padding: EdgeInsets.all(10), child: CircularProgressIndicator()));
-          final counts = _count(snapshot.data!.docs);
-          final signature = '${counts['total']}:${counts['male']}:${counts['female']}:${counts['kk']}';
-          if (_lastPublished != signature) {
-            _lastPublished = signature;
-            Future.microtask(() => _summaryRef.set({...counts, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true)));
-          }
-          return _renderStats(context, counts['total']!, counts['male']!, counts['female']!, counts['kk']!);
-        },
-      );
-    }
-    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: _summaryRef.snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData || !snapshot.data!.exists) return const SizedBox.shrink();
-        final d = snapshot.data!.data()!;
-        return _renderStats(context, (d['total'] as num?)?.toInt() ?? 0, (d['male'] as num?)?.toInt() ?? 0, (d['female'] as num?)?.toInt() ?? 0, (d['kk'] as num?)?.toInt() ?? 0);
-      },
-    );
-  }
-}
-Widget _populationRing(String label, int count, double pct, Color color) => Column(children: [
-  SizedBox(width: 82, height: 82, child: Stack(alignment: Alignment.center, children: [
-    SizedBox.expand(child: CircularProgressIndicator(value: pct, strokeWidth: 8, backgroundColor: color.withOpacity(.13), valueColor: AlwaysStoppedAnimation<Color>(color))),
-    Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text('${(pct * 100).toStringAsFixed(1)}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)), Text('$count jiwa', style: const TextStyle(fontSize: 9))]),
-  ])), const SizedBox(height: 6), Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
-]);
-Widget _populationNumber(String label, int count, IconData icon) => Row(children: [Icon(icon, color: const Color(0xFF21865D)), const SizedBox(width: 7), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('$count', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)), Text(label, style: const TextStyle(fontSize: 10, color: Colors.black54))]))]);
 
 class RondaSchedulePage extends StatefulWidget {
   final bool isAdmin;
@@ -1108,302 +960,357 @@ class RondaSchedulePage extends StatefulWidget {
 
 class _RondaSchedulePageState extends State<RondaSchedulePage> {
   static const days = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'];
+  DateTime weekStart = DateTime.now().subtract(Duration(days: DateTime.now().weekday - 1));
   int selectedDay = DateTime.now().weekday - 1;
-  DateTime selectedDate = DateTime.now();
-  String get dateKey => '${selectedDate.year.toString().padLeft(4,'0')}-${selectedDate.month.toString().padLeft(2,'0')}-${selectedDate.day.toString().padLeft(2,'0')}';
-  String get dayName => days[selectedDay];
+  String dateKeyFor(int index) {
+    final d = weekStart.add(Duration(days:index));
+    return '${d.year.toString().padLeft(4,'0')}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
+  }
+  String dateLabel(DateTime d) => '${d.day.toString().padLeft(2,'0')}-${d.month.toString().padLeft(2,'0')}-${d.year}';
 
   @override
+  Widget build(BuildContext context) {
+    final uid = Db.auth.currentUser?.uid;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Jadwal Ronda'), actions: [
+        IconButton(tooltip:'Laporan ronda', icon: const Icon(Icons.summarize_outlined), onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RondaReportsPage(isAdmin: widget.isAdmin)))),
+      ]),
+      floatingActionButton: widget.isAdmin ? FloatingActionButton.extended(
+        onPressed: () => showRondaScheduleForm(context), icon: const Icon(Icons.edit_calendar), label: const Text('Atur jadwal')) : null,
+      body: StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(
+        stream: uid == null ? null : Db.user(uid).snapshots(),
+        builder: (context, profileSnap) {
+          final profile = profileSnap.data?.data() ?? <String,dynamic>{};
+          final wargaId = (profile['wargaId'] ?? '').toString();
+          return StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
+            stream: Db.module('ronda').snapshots(),
+            builder: (context, snap) {
+              if (snap.hasError) return Center(child: Text('Gagal memuat jadwal: ${snap.error}'));
+              if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+              final all = snap.data!.docs;
+              return ListView(padding: const EdgeInsets.all(16), children: [
+                Container(padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: const Color(0xFFEAF4ED), borderRadius: BorderRadius.circular(18)), child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Jadwal Piket Keamanan Lingkungan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+                  SizedBox(height: 5), Text('Warga dapat melihat jadwal seluruh hari. Absensi dan status berhalangan hanya dapat diisi untuk diri sendiri.'),
+                ])),
+                const SizedBox(height: 12),
+                Row(children: [
+                  IconButton(onPressed: () => setState(() { weekStart = weekStart.subtract(const Duration(days:7)); }), icon: const Icon(Icons.chevron_left)),
+                  Expanded(child: Center(child: Text('${dateLabel(weekStart)} – ${dateLabel(weekStart.add(const Duration(days:6)))}', style: const TextStyle(fontWeight: FontWeight.bold)))),
+                  IconButton(onPressed: () => setState(() { weekStart = weekStart.add(const Duration(days:7)); }), icon: const Icon(Icons.chevron_right)),
+                ]),
+                GridView.count(shrinkWrap:true, physics:const NeverScrollableScrollPhysics(), crossAxisCount:4, childAspectRatio:1.45, mainAxisSpacing:8, crossAxisSpacing:8,
+                  children: List.generate(7, (i) {
+                    final selected = selectedDay == i;
+                    return InkWell(onTap:() => setState(() => selectedDay=i), borderRadius:BorderRadius.circular(12), child: Container(
+                      alignment:Alignment.center, decoration:BoxDecoration(color:selected?const Color(0xFF167C55):Colors.white, borderRadius:BorderRadius.circular(12), border:Border.all(color:selected?const Color(0xFF167C55):const Color(0xFFDCE5DE))),
+                      child: Column(mainAxisAlignment:MainAxisAlignment.center, children:[Text(days[i], style:TextStyle(fontWeight:FontWeight.w700,color:selected?Colors.white:Colors.black87)), Text(dateLabel(weekStart.add(Duration(days:i))).substring(0,5), style:TextStyle(fontSize:10,color:selected?Colors.white70:Colors.black54))]),
+                    ));
+                  }),
+                ),
+                const SizedBox(height:14),
+                Row(children:[Expanded(child:Text('${days[selectedDay]}, ${dateLabel(weekStart.add(Duration(days:selectedDay)))}',style:const TextStyle(fontSize:17,fontWeight:FontWeight.bold))), IconButton(tooltip:'Kirim daftar hari ini ke WhatsApp', onPressed:() => shareRondaDay(context, all.where((d)=>(d.data()['hari']??'').toString().toLowerCase()==days[selectedDay].toLowerCase()).toList(), days[selectedDay], dateLabel(weekStart.add(Duration(days:selectedDay))), dateKeyFor(selectedDay), profile), icon:const Icon(Icons.share,color:Colors.green))]),
+                ...all.where((d)=>(d.data()['hari']??'').toString().toLowerCase()==days[selectedDay].toLowerCase()).map((doc) => _RondaDayCard(
+                  doc:doc, isAdmin:widget.isAdmin, uid:uid??'', wargaId:wargaId, dateKey:dateKeyFor(selectedDay), day:days[selectedDay],
+                  onEdit:() => showRondaScheduleForm(context, docId:doc.id, initial:doc.data()),
+                  onDelete:() async { final ok=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(title:const Text('Hapus jadwal?'),content:const Text('Jadwal ronda ini akan dihapus.'),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('Batal')),FilledButton(onPressed:()=>Navigator.pop(c,true),child:const Text('Hapus'))])); if(ok==true){await Db.module('ronda').doc(doc.id).delete();} },
+                )),
+                if (all.where((d)=>(d.data()['hari']??'').toString().toLowerCase()==days[selectedDay].toLowerCase()).isEmpty)
+                  const Card(child:Padding(padding:EdgeInsets.all(16),child:Text('Belum ada petugas yang dijadwalkan pada hari ini.'))),
+                const SizedBox(height:12),
+                OutlinedButton.icon(onPressed:() => Navigator.push(context,MaterialPageRoute(builder:(_)=>RondaReportsPage(isAdmin:widget.isAdmin))), icon:const Icon(Icons.summarize_outlined), label:const Text('Lihat Laporan Ronda')),
+              ]);
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _RondaDayCard extends StatelessWidget {
+  final QueryDocumentSnapshot<Map<String,dynamic>> doc;
+  final bool isAdmin;
+  final String uid,wargaId,dateKey,day;
+  final VoidCallback onEdit,onDelete;
+  const _RondaDayCard({required this.doc,required this.isAdmin,required this.uid,required this.wargaId,required this.dateKey,required this.day,required this.onEdit,required this.onDelete});
+  @override
+  Widget build(BuildContext context) {
+    final d=doc.data();
+    final raw=d['petugas'];
+    final members=raw is List ? raw.whereType<Map>().map((e)=>Map<String,dynamic>.from(e)).toList() : <Map<String,dynamic>>[];
+    final names=members.isNotEmpty ? members : (d['anggota']??'').toString().split(RegExp(r'[,;\n]')).where((x)=>x.trim().isNotEmpty).map((n)=>{'nama':n.trim()}).toList();
+    final my=names.cast<Map<String,dynamic>?>().firstWhere((m)=>(m?['uid']??'').toString()==uid || (wargaId.isNotEmpty && (m?['wargaId']??'').toString()==wargaId),orElse:()=>null);
+    return Card(margin:const EdgeInsets.only(bottom:12), child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Row(children:[Expanded(child:Text('RT ${d['rt']??'-'} / RW ${d['rw']??'-'}',style:const TextStyle(fontWeight:FontWeight.bold))), if(isAdmin) PopupMenuButton<String>(onSelected:(v){if(v=='edit')onEdit();if(v=='delete')onDelete();},itemBuilder:(_)=>const [PopupMenuItem(value:'edit',child:Text('Edit jadwal')),PopupMenuItem(value:'delete',child:Text('Hapus jadwal'))])]),
+      Text('Waktu ronda: ${d['jamMulai']??'21.00'} – ${d['jamSelesai']??'04.00'}'),
+      const Divider(),
+      const Text('Daftar petugas',style:TextStyle(fontWeight:FontWeight.bold)),
+      ...names.map((m){final n=(m['nama']??'Petugas').toString(); final memberUid=(m['uid']??'').toString(); final keyUid=memberUid.isNotEmpty?memberUid:(m['wargaId']??n).toString(); final statusId='${dateKey}_${keyUid}_${doc.id}';
+        return _RondaMemberLine(name:n, uid:uid, isMe:my!=null && ((my['uid']??'').toString()==memberUid || (my['wargaId']??'').toString()==(m['wargaId']??'')), statusId:statusId, dateKey:dateKey, scheduleId:doc.id, day:day, canSelf:my!=null && (memberUid.isEmpty || memberUid==uid));
+      }),
+      if(my!=null) _RondaSelfActions(uid:uid,wargaId:wargaId,name:(my['nama']??'Warga').toString(),dateKey:dateKey,day:day,scheduleId:doc.id),
+      if(my==null && !isAdmin) const Padding(padding:EdgeInsets.only(top:6),child:Text('Anda tidak bertugas pada regu ini.',style:TextStyle(color:Colors.black54,fontSize:12))),
+    ])));
+  }
+}
+
+class _RondaMemberLine extends StatelessWidget {
+  final String name,uid,statusId,dateKey,scheduleId,day; final bool isMe,canSelf;
+  const _RondaMemberLine({required this.name,required this.uid,required this.isMe,required this.statusId,required this.dateKey,required this.scheduleId,required this.day,required this.canSelf});
+  @override
+  Widget build(BuildContext context)=>StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(
+    stream:Db.module('ronda_absensi').doc(statusId).snapshots(),
+    builder:(context,snap){final a=snap.data?.data()??{}; final hadir=a['waktuHadir']!=null || a['status']=='Hadir'; final pulang=a['waktuPulang']!=null; final status=(a['statusKesediaan']??'Belum mengisi').toString();
+      return Padding(padding:const EdgeInsets.symmetric(vertical:3),child:Row(children:[Icon(hadir?Icons.check_circle:pulang?Icons.check_circle_outline:Icons.circle_outlined,color:hadir?Colors.green:Colors.grey,size:18),const SizedBox(width:8),Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(name,style:const TextStyle(fontWeight:FontWeight.w500)),Text('Kesediaan: $status • ${hadir?'Hadir ${_timeText(a['waktuHadir'])}': 'Belum hadir'}${pulang?' • Pulang ${_timeText(a['waktuPulang'])}':''}',style:const TextStyle(fontSize:10,color:Colors.black54))])),if(a['alasan']!=null && a['alasan'].toString().isNotEmpty) IconButton(tooltip:'Alasan: ${a['alasan']}',onPressed:()=>showMessage(context,'Alasan $name: ${a['alasan']}'),icon:const Icon(Icons.info_outline,size:18))]));
+    });
+}
+
+class _RondaSelfActions extends StatelessWidget {
+  final String uid,wargaId,name,dateKey,day,scheduleId;
+  const _RondaSelfActions({required this.uid,required this.wargaId,required this.name,required this.dateKey,required this.day,required this.scheduleId});
+  String get docKey=>'${dateKey}_${uid}_$scheduleId';
+  Future<void> setAvailability(BuildContext context,String status) async {
+    String reason='';
+    if(status=='Berhalangan'){
+      final c=TextEditingController();
+      final ok=await showDialog<bool>(context:context,builder:(ctx)=>AlertDialog(title:const Text('Alasan berhalangan'),content:TextField(controller:c,maxLines:3,decoration:const InputDecoration(hintText:'Contoh: sakit, bekerja, keperluan keluarga')),actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Batal')),FilledButton(onPressed:()=>Navigator.pop(ctx,c.text.trim().isNotEmpty),child:const Text('Simpan'))]));
+      if(ok!=true){c.dispose();return;} reason=c.text.trim();c.dispose();
+    }
+    await Db.module('ronda_absensi').doc(docKey).set({'uid':uid,'wargaId':wargaId,'nama':name,'tanggal':dateKey,'hari':day,'scheduleId':scheduleId,'statusKesediaan':status,'alasan':reason,'diperbaruiPada':FieldValue.serverTimestamp()},SetOptions(merge:true));
+    if(context.mounted)showMessage(context,status=='Berhalangan'?'Alasan berhalangan dicatat.':'Status bersedia dicatat.');
+  }
+  Future<void> attendance(BuildContext context,String field) async {
+    final now=DateTime.now().toUtc().add(const Duration(hours:7));
+    await Db.module('ronda_absensi').doc(docKey).set({'uid':uid,'wargaId':wargaId,'nama':name,'tanggal':dateKey,'hari':day,'scheduleId':scheduleId,field:FieldValue.serverTimestamp(),'${field}Text':'${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}','updatedAt':FieldValue.serverTimestamp(),if(field=='waktuHadir')'status':'Hadir',if(field=='waktuPulang')'status':'Selesai Ronda'},SetOptions(merge:true));
+    if(context.mounted)showMessage(context,field=='waktuHadir'?'Waktu hadir berhasil dicatat.':'Waktu pulang berhasil dicatat.');
+  }
+  @override
+  Widget build(BuildContext context)=>StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.module('ronda_absensi').doc(docKey).snapshots(),builder:(context,snap){final d=snap.data?.data()??{};final avail=(d['statusKesediaan']??'').toString();final hadir=d['waktuHadir']!=null;final pulang=d['waktuPulang']!=null;
+    return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Divider(),const Text('Status dan absensi Anda',style:TextStyle(fontWeight:FontWeight.bold)),Wrap(spacing:8,runSpacing:6,children:[OutlinedButton.icon(onPressed:()=>setAvailability(context,'Bersedia'),icon:const Icon(Icons.check_circle_outline),label:const Text('Bersedia')),OutlinedButton.icon(onPressed:()=>setAvailability(context,'Berhalangan'),icon:const Icon(Icons.event_busy),label:const Text('Berhalangan'))]),if(avail.isNotEmpty)Text('Status: $avail${(d['alasan']??'').toString().isNotEmpty?' • ${d['alasan']}':''}',style:const TextStyle(fontSize:12)),const SizedBox(height:8),Row(children:[Expanded(child:FilledButton.icon(onPressed:hadir?null:()=>attendance(context,'waktuHadir'),icon:const Icon(Icons.login),label:Text(hadir?'Hadir ${_timeText(d['waktuHadir'])}':'HADIR'))),const SizedBox(width:8),Expanded(child:FilledButton.tonalIcon(onPressed:(!hadir||pulang)?null:()=>attendance(context,'waktuPulang'),icon:const Icon(Icons.logout),label:Text(pulang?'Pulang ${_timeText(d['waktuPulang'])}':'PULANG')))]),]);});
+}
+
+String _timeText(dynamic value) {
+  if(value is Timestamp){final d=value.toDate().toUtc().add(const Duration(hours:7));return '${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';}
+  return (value??'--:--').toString();
+}
+
+Future<void> showRondaScheduleForm(BuildContext context,{String? docId,Map<String,dynamic>? initial}) async {
+  final allSnap=await Db.module('sensus').get();
+  if(!context.mounted)return;
+  final residents=allSnap.docs.map((d){final m=d.data();return <String,dynamic>{...m,'wargaId':d.id};}).where((m){final gender=(m['jenisKelamin']??m['jenis_kelamin']??'').toString().toLowerCase();return gender.contains('laki') || gender=='l' || gender=='male';}).toList();
+  final search=TextEditingController(); final rt=TextEditingController(text:(initial?['rt']??'').toString()); final rw=TextEditingController(text:(initial?['rw']??'').toString()); final start=TextEditingController(text:(initial?['jamMulai']??'21.00').toString()); final finish=TextEditingController(text:(initial?['jamSelesai']??'04.00').toString());
+  final days=['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu']; String day=(initial?['hari']??days[DateTime.now().weekday-1]).toString();
+  final selected=<String>{}; final existing=initial?['petugas']; if(existing is List){for(final e in existing){if(e is Map && e['wargaId']!=null)selected.add(e['wargaId'].toString());}}
+  await showModalBottomSheet(context:context,isScrollControlled:true,backgroundColor:Colors.transparent,builder:(ctx)=>Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx).viewInsets.bottom),child:Container(height:MediaQuery.of(ctx).size.height*.88,padding:const EdgeInsets.all(16),decoration:const BoxDecoration(color:Color(0xFFF5F8F6),borderRadius:BorderRadius.vertical(top:Radius.circular(24))),child:StatefulBuilder(builder:(ctx,setStateSheet){final filtered=residents.where((r){final q=search.text.toLowerCase();final n=(r['nama']??'').toString().toLowerCase();final residentRt=(r['rt']??'').toString().toLowerCase();return (q.isEmpty||n.contains(q))&&(rt.text.trim().isEmpty||residentRt==rt.text.trim().toLowerCase());}).toList();return Column(children:[Text(docId==null?'Buat Jadwal Ronda':'Edit Jadwal Ronda',style:Theme.of(ctx).textTheme.titleLarge),const SizedBox(height:10),DropdownButtonFormField<String>(value:day,decoration:const InputDecoration(labelText:'Hari ronda'),items:days.map((d)=>DropdownMenuItem(value:d,child:Text(d))).toList(),onChanged:(v){if(v!=null)setStateSheet(()=>day=v);}),const SizedBox(height:8),Row(children:[Expanded(child:TextField(controller:rt,decoration:const InputDecoration(labelText:'RT'),onChanged:(_)=>setStateSheet((){}))),const SizedBox(width:8),Expanded(child:TextField(controller:rw,decoration:const InputDecoration(labelText:'RW')))]),const SizedBox(height:8),Row(children:[Expanded(child:TextField(controller:start,decoration:const InputDecoration(labelText:'Jam mulai'))),const SizedBox(width:8),Expanded(child:TextField(controller:finish,decoration:const InputDecoration(labelText:'Jam selesai')))]),const SizedBox(height:8),TextField(controller:search,decoration:const InputDecoration(prefixIcon:Icon(Icons.search),labelText:'Cari nama warga laki-laki'),onChanged:(_)=>setStateSheet((){})),const SizedBox(height:8),Align(alignment:Alignment.centerLeft,child:Text('Pilih petugas (${selected.length})',style:const TextStyle(fontWeight:FontWeight.bold))),Expanded(child:filtered.isEmpty?const Center(child:Text('Tidak ada warga laki-laki pada RT ini.')):ListView.builder(itemCount:filtered.length,itemBuilder:(_,i){final r=filtered[i];final id=(r['wargaId']??'').toString();return CheckboxListTile(value:selected.contains(id),title:Text((r['nama']??'Tanpa nama').toString()),subtitle:Text('RT ${r['rt']??'-'} / RW ${r['rw']??'-'}'),onChanged:(v)=>setStateSheet((){if(v==true)selected.add(id);else selected.remove(id);}));})),Row(children:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),const Spacer(),FilledButton(onPressed:selected.isEmpty?null:()async{final picked=residents.where((r)=>selected.contains((r['wargaId']??'').toString())).toList();final petugas=picked.map((r)=>{'wargaId':r['wargaId'],'uid':r['accountUid']??'','nama':r['nama']??'','rt':r['rt']??'','rw':r['rw']??''}).toList();final payload={'hari':day,'rt':rt.text.trim(),'rw':rw.text.trim(),'jamMulai':start.text.trim(),'jamSelesai':finish.text.trim(),'petugas':petugas,'anggotaUid':petugas.map((e)=>e['uid']).where((e)=>e.toString().isNotEmpty).toList(),'anggota':petugas.map((e)=>e['nama']).join(', '),'updatedAt':FieldValue.serverTimestamp(),'updatedBy':Db.auth.currentUser?.uid};if(docId==null){payload['createdAt']=FieldValue.serverTimestamp();await Db.module('ronda').add(payload);}else{await Db.module('ronda').doc(docId).update(payload);}if(ctx.mounted)Navigator.pop(ctx);if(context.mounted)showMessage(context,'Jadwal ronda berhasil disimpan.');},child:const Text('Simpan Jadwal'))])]);})))); 
+  search.dispose();rt.dispose();rw.dispose();start.dispose();finish.dispose();
+}
+
+Future<void> shareRondaDay(BuildContext context,List<QueryDocumentSnapshot<Map<String,dynamic>>> docs,String day,String date,String dateKey,Map<String,dynamic> profile) async {
+  final b=StringBuffer('LAPORAN RONDA KAMPUNG KIARAJANGKUNG\n$day, $date\n\n');
+  for(final doc in docs){
+    final d=doc.data();
+    b.writeln('RT ${d['rt']??'-'} / RW ${d['rw']??'-'} | ${d['jamMulai']??'21.00'}-${d['jamSelesai']??'04.00'}');
+    final members=d['petugas'];
+    if(members is List){
+      final attendance=await Db.module('ronda_absensi').where('tanggal',isEqualTo:dateKey).where('scheduleId',isEqualTo:doc.id).get();
+      final byUid={for(final a in attendance.docs)(a.data()['uid']??'').toString():a.data()};
+      for(final member in members){
+        if(member is! Map)continue;
+        final uid=(member['uid']??'').toString(); final a=byUid[uid]??<String,dynamic>{};
+        final reason=(a['alasan']??'').toString();
+        b.writeln('- ${member['nama']??'Petugas'} | ${a['statusKesediaan']??'Belum mengisi'} | ${a['waktuHadir']!=null?'Hadir ${_timeText(a['waktuHadir'])}':'Belum hadir'} | ${a['waktuPulang']!=null?'Pulang ${_timeText(a['waktuPulang'])}':'Belum pulang'}${reason.isEmpty?'':' | Alasan: $reason'}');
+      }
+    } else { b.writeln((d['anggota']??'').toString()); }
+    b.writeln();
+  }
+  try { await launchUrl(Uri.parse('https://wa.me/?text=${Uri.encodeComponent(b.toString())}'),mode:LaunchMode.externalApplication); }
+  catch(e){if(context.mounted)showMessage(context,'Tidak dapat membuka WhatsApp: $e');}
+}
+
+class RondaReportsPage extends StatelessWidget {
+  final bool isAdmin;
+  const RondaReportsPage({super.key, required this.isAdmin});
+  @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Jadwal Ronda')),
-    floatingActionButton: widget.isAdmin ? FloatingActionButton.extended(onPressed: () => showRecordForm(context, modules.firstWhere((m) => m.keyName == 'ronda'), isAdmin: true), icon: const Icon(Icons.edit_calendar), label: const Text('Atur jadwal')) : null,
+    appBar: AppBar(title: const Text('Laporan Ronda')),
     body: StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
-      stream: Db.module('ronda').snapshots(),
+      stream: Db.module('ronda_absensi').orderBy('tanggal', descending: true).limit(150).snapshots(),
       builder: (context, snap) {
-        if (snap.hasError) return Center(child: Text('Gagal memuat jadwal: ${snap.error}'));
+        if (snap.hasError) return Center(child: Text('Gagal memuat laporan: ${snap.error}'));
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
         final docs = snap.data!.docs;
-        final selected = docs.where((d) => (d.data()['hari'] ?? '').toString().toLowerCase() == dayName.toLowerCase()).toList();
+        if (docs.isEmpty) return const Center(child: Text('Belum ada data laporan ronda.'));
+        final uid = Db.auth.currentUser?.uid ?? '';
         return ListView(padding: const EdgeInsets.all(16), children: [
-          Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: const Color(0xFFEAF4ED), borderRadius: BorderRadius.circular(16)), child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Jadwal Piket Keamanan Lingkungan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)), SizedBox(height: 5), Text('Pilih hari untuk melihat petugas dan mengisi kehadiran ronda.') ])),
-          const SizedBox(height: 14),
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 4,
-            childAspectRatio: 1.45,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            children: List.generate(7, (i) {
-              final isSelected = selectedDay == i;
-              return InkWell(
-                onTap: () => setState(() {
-                  selectedDay = i;
-                  final delta = i - (selectedDate.weekday - 1);
-                  selectedDate = selectedDate.add(Duration(days: delta));
-                }),
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF167C55) : Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isSelected ? const Color(0xFF167C55) : const Color(0xFFDCE5DE),
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    days[i],
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: isSelected ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 16),
-          Row(children: [Expanded(child: Text('$dayName, ${selectedDate.day}-${selectedDate.month}-${selectedDate.year}', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold))), IconButton(onPressed: () => setState(() { selectedDate = selectedDate.subtract(const Duration(days: 7)); }), icon: const Icon(Icons.chevron_left)), IconButton(onPressed: () => setState(() { selectedDate = selectedDate.add(const Duration(days: 7)); }), icon: const Icon(Icons.chevron_right))]),
-          if (selected.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(16), child: Text('Belum ada petugas yang dijadwalkan pada hari ini.'))),
-          ...selected.map((doc) {
+          ...docs.map((doc) {
             final d = doc.data();
-            final names = (d['anggota'] ?? '').toString()
-                .split(RegExp(r'[,;\n]'))
-                .map((e) => e.trim())
-                .where((e) => e.isNotEmpty)
-                .toList();
-            return Card(
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      Expanded(child: Text('RT ${d['rt'] ?? '-'} / RW ${d['rw'] ?? '-'}',
-                        style: const TextStyle(fontWeight: FontWeight.bold))),
-                      if (widget.isAdmin) ...[
-                        IconButton(
-                          tooltip: 'Edit jadwal',
-                          icon: const Icon(Icons.edit_outlined, color: Color(0xFF167C55)),
-                          onPressed: () => showRecordForm(
-                            context,
-                            modules.firstWhere((m) => m.keyName == 'ronda'),
-                            isAdmin: true,
-                            docId: doc.id,
-                            initial: d,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Hapus jadwal',
-                          icon: const Icon(Icons.delete_outline, color: Colors.red),
-                          onPressed: () async {
-                            final confirm = await showDialog<bool>(
-                              context: context,
-                              builder: (dialogContext) => AlertDialog(
-                                title: const Text('Hapus jadwal ronda?'),
-                                content: Text('Jadwal ${d['hari'] ?? dayName}, RT ${d['rt'] ?? '-'} / RW ${d['rw'] ?? '-'} akan dihapus.'),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Batal')),
-                                  FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Hapus')),
-                                ],
-                              ),
-                            );
-                            if (confirm == true) {
-                              try {
-                                await Db.module('ronda').doc(doc.id).delete();
-                                if (context.mounted) showMessage(context, 'Jadwal ronda berhasil dihapus.');
-                              } catch (e) {
-                                if (context.mounted) showMessage(context, 'Gagal menghapus jadwal: $e');
-                              }
-                            }
-                          },
-                        ),
-                      ],
-                    ]),
-                    const SizedBox(height: 4),
-                    Text('Waktu: ${d['jamMulai'] ?? '21.00'} – ${d['jamSelesai'] ?? '04.00'}'),
-                    const Divider(),
-                    const Text('Petugas ronda', style: TextStyle(fontWeight: FontWeight.w700)),
-                    if (names.isEmpty) const Text('Nama petugas belum diisi.'),
-                    if (names.isNotEmpty)
-                      _RondaRosterStatus(dateKey: dateKey, scheduleId: doc.id, names: names),
-                    const SizedBox(height: 8),
-                    _RondaAttendance(dateKey: dateKey, day: dayName, scheduleId: doc.id, names: names),
-                  ],
-                ),
-              ),
-            );
+            final hadir = d['waktuHadir'] != null;
+            final pulang = d['waktuPulang'] != null;
+            final reason = (d['alasan'] ?? '').toString();
+            final text = '${d['hari'] ?? ''}, ${d['tanggal'] ?? ''}\n${d['nama'] ?? 'Warga'}\nKesediaan: ${d['statusKesediaan'] ?? 'Belum mengisi'}${reason.isEmpty ? '' : '\nAlasan: $reason'}\nKehadiran: ${hadir ? 'Hadir ${_timeText(d['waktuHadir'])}' : 'Belum hadir'}\nPulang: ${pulang ? _timeText(d['waktuPulang']) : 'Belum pulang'}';
+            final canShare = isAdmin || (d['uid'] ?? '').toString() == uid;
+            return Card(child: ListTile(
+              leading: const Icon(Icons.assignment_outlined),
+              title: Text((d['nama'] ?? 'Laporan ronda').toString()),
+              subtitle: Text('${d['hari'] ?? ''} • ${d['tanggal'] ?? ''}\n${hadir ? 'Hadir ${_timeText(d['waktuHadir'])}' : 'Belum hadir'}${pulang ? ' • Pulang ${_timeText(d['waktuPulang'])}' : ''}${reason.isNotEmpty ? ' • $reason' : ''}'),
+              isThreeLine: true,
+              trailing: canShare ? IconButton(
+                tooltip: 'Kirim laporan WhatsApp', icon: const Icon(Icons.share, color: Colors.green),
+                onPressed: () => launchUrl(Uri.parse('https://wa.me/?text=${Uri.encodeComponent('LAPORAN RONDA\n$text')}'), mode: LaunchMode.externalApplication),
+              ) : null,
+            ));
           }),
-          const SizedBox(height: 12),
-          const Text('Pengingat push H-1 dan 1 jam sebelum ronda serta notifikasi perubahan jadwal memerlukan Firebase Cloud Messaging dan fungsi server terjadwal.', style: TextStyle(fontSize: 11, color: Colors.black54)),
+          if (isAdmin) FilledButton.icon(
+            onPressed: () async {
+              final b = StringBuffer('REKAP LAPORAN RONDA KAMPUNG KIARAJANGKUNG\n');
+              for (final doc in docs) {
+                final x = doc.data();
+                b.writeln('${x['tanggal']} ${x['nama']} | ${x['statusKesediaan'] ?? '-'} | ${x['waktuHadir'] != null ? 'Hadir ${_timeText(x['waktuHadir'])}' : 'Tidak hadir'} | ${x['waktuPulang'] != null ? 'Pulang ${_timeText(x['waktuPulang'])}' : 'Belum pulang'}${(x['alasan'] ?? '').toString().isEmpty ? '' : ' | Alasan: ${x['alasan']}'}');
+              }
+              await launchUrl(Uri.parse('https://wa.me/?text=${Uri.encodeComponent(b.toString())}'), mode: LaunchMode.externalApplication);
+            },
+            icon: const Icon(Icons.share), label: const Text('Kirim rekap laporan WhatsApp'),
+          ),
         ]);
       },
     ),
   );
 }
 
-class _RondaRosterStatus extends StatelessWidget {
-  final String dateKey;
-  final String scheduleId;
-  final List<String> names;
-
-  const _RondaRosterStatus({
-    required this.dateKey,
-    required this.scheduleId,
-    required this.names,
-  });
-
-  @override
-  Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-    stream: Db.module('ronda_absensi')
-        .where('tanggal', isEqualTo: dateKey)
-        .where('scheduleId', isEqualTo: scheduleId)
-        .snapshots(),
-    builder: (context, snapshot) {
-      final present = <String>{};
-      for (final attendanceDoc in snapshot.data?.docs ?? []) {
-        final name = (attendanceDoc.data()['nama'] ?? '').toString().trim().toLowerCase();
-        if (name.isNotEmpty) present.add(name);
-      }
-      return Column(
-        children: names.map((name) {
-          final isPresent = present.contains(name.trim().toLowerCase());
-          return ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(
-              isPresent ? Icons.check_circle : Icons.cancel,
-              color: isPresent ? Colors.green : Colors.red,
-            ),
-            title: Text(name),
-            trailing: Text(
-              isPresent ? 'HADIR' : 'BELUM HADIR',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: isPresent ? Colors.green.shade700 : Colors.red.shade700,
-              ),
-            ),
-          );
-        }).toList(),
-      );
-    },
-  );
-}
-
-class _RondaAttendance extends StatelessWidget {
-  final String dateKey, day, scheduleId;
-  final List<String> names;
-  const _RondaAttendance({required this.dateKey, required this.day, required this.scheduleId, required this.names});
-  @override
-  Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return const Text('Masuk untuk mengisi absensi.');
-    final attendance = Db.module('ronda_absensi').doc('${dateKey}_${user.uid}_$scheduleId');
-    return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream: attendance.snapshots(), builder: (context, snap) {
-      final data = snap.data?.data();
-      final checked = data != null;
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Divider(),
-        Text(checked ? 'Absensi Anda: ${data['status'] ?? 'Hadir'} • ${data['waktuText'] ?? ''}' : 'Absensi kehadiran Anda', style: const TextStyle(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 8),
-        SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: checked ? null : () async {
-          final profile = await Db.user(user.uid).get();
-          final p = profile.data() ?? {};
-          final name = (p['nama'] ?? p['namaLengkap'] ?? user.displayName ?? user.email ?? 'Warga').toString();
-          final now = DateTime.now();
-          await attendance.set({'uid': user.uid, 'nama': name, 'tanggal': dateKey, 'hari': day, 'scheduleId': scheduleId, 'status': 'Hadir', 'waktu': Timestamp.fromDate(now), 'waktuText': '${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}', 'createdAt': FieldValue.serverTimestamp()});
-          if (context.mounted) showMessage(context, 'Absensi berhasil dicatat.');
-        }, icon: Icon(checked ? Icons.check_circle : Icons.how_to_reg), label: Text(checked ? 'Sudah absen' : 'Absen hadir'))),
-        StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(stream: Db.module('ronda_absensi').where('tanggal', isEqualTo: dateKey).where('scheduleId', isEqualTo: scheduleId).snapshots(), builder: (context, a) { final count = a.data?.docs.length ?? 0; return Padding(padding: const EdgeInsets.only(top: 6), child: Text('Kehadiran tercatat: $count orang', style: const TextStyle(fontSize: 11, color: Colors.black54))); }),
-      ]);
-    });
-  }
-}
-
 class DashboardRondaPreview extends StatelessWidget {
-  const DashboardRondaPreview({super.key});
-
-  @override
-  Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-    stream: Db.module('ronda').limit(3).snapshots(),
-    builder: (context, snapshot) {
-      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const _DashboardSectionTitle(title: 'Informasi Jadwal Ronda'),
-        ...snapshot.data!.docs.map((doc) {
-          final d = doc.data();
-          final area = ['RT ${d['rt'] ?? '-'}', 'RW ${d['rw'] ?? '-'}'].join(' / ');
-          final hours = '${d['jamMulai'] ?? '--:--'} – ${d['jamSelesai'] ?? '--:--'}';
-          final members = (d['anggota'] ?? '').toString();
-          return Card(
-            margin: const EdgeInsets.only(bottom: 7),
-            child: ListTile(
-              leading: const CircleAvatar(backgroundColor: Color(0xFFE9EDF7),
-                child: Icon(Icons.shield_moon, color: Color(0xFF586B9B))),
-              title: Text((d['hari'] ?? 'Jadwal ronda').toString(),
-                style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text('$area • $hours${members.isEmpty ? '' : '\nPetugas: $members'}',
-                maxLines: 3, overflow: TextOverflow.ellipsis),
-            ),
-          );
-        }),
-        const Padding(
-          padding: EdgeInsets.only(top: 2),
-          child: Text('Absensi kehadiran dan pemberitahuan giliran ronda memerlukan pengaturan izin database serta layanan notifikasi.',
-            style: TextStyle(fontSize: 11, color: Colors.black54)),
-        ),
-      ]);
-    },
-  );
-}
-
-class DashboardAnnouncements extends StatelessWidget {
-  const DashboardAnnouncements({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: Db.module('pengumuman').snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError || !snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const SizedBox.shrink();
-        }
-        final items = snapshot.data!.docs.map((d) => d.data()).where((d) {
-          final status = (d['status'] ?? 'aktif').toString().toLowerCase();
-          return status != 'nonaktif' && status != 'arsip';
-        }).toList();
-        if (items.isEmpty) return const SizedBox.shrink();
-        final message = items.map((d) {
-          final title = (d['judul'] ?? d['nama'] ?? 'Pengumuman').toString();
-          final detail = (d['deskripsi'] ?? d['keterangan'] ?? '').toString();
-          return detail.trim().isEmpty ? title : '$title: $detail';
-        }).join('     •     ');
-        return Container(
-          height: 54,
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFF1CC),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFFFD778)),
-          ),
-          child: Row(children: [
-            Container(
-              height: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: const BoxDecoration(
-                color: Color(0xFFFFD778),
-                borderRadius: BorderRadius.horizontal(left: Radius.circular(13)),
-              ),
-              child: const Icon(Icons.campaign_rounded, color: Color(0xFF704900)),
-            ),
-            const SizedBox(width: 10),
-            Expanded(child: _MarqueeText(text: message)),
-          ]),
-        );
+  final Map<String,dynamic> profile;
+  const DashboardRondaPreview({super.key,required this.profile});
+  @override Widget build(BuildContext context){
+    final uid=Db.auth.currentUser?.uid??''; final wargaId=(profile['wargaId']??'').toString();
+    return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(
+      stream:wargaId.isEmpty?null:Db.module('sensus').doc(wargaId).snapshots(),
+      builder:(context,residentSnap){
+      final gender=((residentSnap.data?.data()?['jenisKelamin'])??profile['jenisKelamin']??'').toString().toLowerCase();
+      if(gender.contains('perempuan') || gender=='p')return const SizedBox.shrink();
+      return StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(stream:Db.module('ronda').snapshots(),builder:(context,snap){
+      if(!snap.hasData)return const SizedBox.shrink();
+      final now=DateTime.now(); final today=DateTime(now.year,now.month,now.day);
+      final dayNames=['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'];
+      final matches=<Map<String,dynamic>>[];
+      for(final doc in snap.data!.docs){final d=doc.data();final petugas=d['petugas'];bool mine=false;
+        if(petugas is List){mine=petugas.any((m)=>m is Map && (((m['uid']??'').toString()==uid && uid.isNotEmpty)||(wargaId.isNotEmpty && (m['wargaId']??'').toString()==wargaId)));}
+        if(!mine){final ids=(d['anggotaUid'] is List)?(d['anggotaUid'] as List).map((e)=>e.toString()).toList():<String>[];mine=ids.contains(uid);}
+        if(mine){final day=dayNames.indexWhere((x)=>x.toLowerCase()==(d['hari']??'').toString().toLowerCase());if(day>=0){var delta=(day+1)-today.weekday;if(delta<0)delta+=7;final date=today.add(Duration(days:delta));matches.add({'data':d,'date':date,'day':dayNames[day]});}}
+      }
+      if(matches.isEmpty)return const SizedBox.shrink();
+      matches.sort((a,b)=>(a['date'] as DateTime).compareTo(b['date'] as DateTime));
+      return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const _DashboardSectionTitle(title:'Jadwal Ronda Anda'),...matches.map((m){final d=m['data'] as Map<String,dynamic>;final date=m['date'] as DateTime;return Card(child:ListTile(leading:const CircleAvatar(backgroundColor:Color(0xFFE9EDF7),child:Icon(Icons.shield_moon,color:Color(0xFF586B9B))),title:Text('${m['day']}, ${date.day}-${date.month}-${date.year}',style:const TextStyle(fontWeight:FontWeight.bold)),subtitle:Text('RT ${d['rt']??'-'} / RW ${d['rw']??'-'} • ${d['jamMulai']??'21.00'}–${d['jamSelesai']??'04.00'}'),onTap:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>const ModulePage(module:ModuleInfo('ronda','Jadwal Ronda','Jadwal ronda',Icons.nightlight_outlined),isAdmin:false)))));})]);
+    });
       },
     );
   }
+}
+
+class DashboardPopulationStats extends StatelessWidget {
+  const DashboardPopulationStats({super.key});
+  @override
+  Widget build(BuildContext context) => StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(
+    stream: Db.module('statistik').doc('penduduk').snapshots(),
+    builder: (context, snap) {
+      if (!snap.hasData || !snap.data!.exists) return const SizedBox.shrink();
+      final d = snap.data!.data() ?? {};
+      final total = (d['totalPenduduk'] ?? 0) as num;
+      final male = (d['lakiLaki'] ?? 0) as num;
+      final female = (d['perempuan'] ?? 0) as num;
+      final kk = (d['totalKK'] ?? 0) as num;
+      final mp = total == 0 ? 0.0 : male / total;
+      final fp = total == 0 ? 0.0 : female / total;
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const _DashboardSectionTitle(title: 'Statistik Penduduk'),
+        Card(child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => showModalBottomSheet<void>(context: context, showDragHandle: true, builder: (ctx) => Padding(
+            padding: const EdgeInsets.all(22), child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('Rincian Kependudukan', style: Theme.of(ctx).textTheme.titleLarge),
+              const SizedBox(height: 18),
+              _statItem('Total Penduduk', '$total jiwa', Icons.groups_outlined),
+              _statItem('Total Kepala Keluarga', '$kk KK', Icons.home_work_outlined),
+              _statItem('Laki-laki', '$male jiwa (${(mp*100).round()}%)', Icons.male),
+              _statItem('Perempuan', '$female jiwa (${(fp*100).round()}%)', Icons.female),
+            ]),
+          )),
+          child: Padding(padding: const EdgeInsets.all(14), child: Column(children: [
+            Row(children: [Expanded(child: _statItem('Total Penduduk', '$total', Icons.groups_outlined)), Expanded(child: _statItem('Total KK', '$kk', Icons.home_work_outlined))]),
+            const SizedBox(height: 14),
+            Row(children: [Expanded(child: _genderCircle('Laki-laki', male.toInt(), mp)), Expanded(child: _genderCircle('Perempuan', female.toInt(), fp))]),
+            const SizedBox(height: 8), const Text('Ketuk untuk melihat rincian', style: TextStyle(fontSize: 10, color: Colors.black54)),
+          ])),
+        )),
+      ]);
+    },
+  );
+}
+Widget _genderCircle(String title, int count, double percent) => Column(children: [
+  SizedBox(width: 76, height: 76, child: Stack(alignment: Alignment.center, children: [
+    SizedBox.expand(child: CircularProgressIndicator(value: percent, strokeWidth: 7, backgroundColor: const Color(0xFFE6EEE8), color: const Color(0xFF167C55))),
+    Text('${(percent*100).round()}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+  ])),
+  const SizedBox(height: 5), Text('$title ($count)', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+]);
+Widget _statItem(String title,String value,IconData icon)=>Padding(padding:const EdgeInsets.symmetric(vertical:5),child:Column(children:[Icon(icon,color:const Color(0xFF167C55)),const SizedBox(height:4),Text(value,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:18)),Text(title,style:const TextStyle(fontSize:11,color:Colors.black54))]));
+
+class DashboardAnnouncements extends StatelessWidget {
+  const DashboardAnnouncements({super.key});
+  @override
+  Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
+    stream: Db.module('pengumuman').snapshots(),
+    builder: (context, snapshot) {
+      if (!snapshot.hasData) return const SizedBox.shrink();
+      final items = snapshot.data!.docs.map((d) => d.data()).where((d) {
+        final status = (d['status'] ?? 'aktif').toString().toLowerCase();
+        return status != 'nonaktif' && status != 'arsip';
+      }).toList();
+      if (items.isEmpty) return const SizedBox.shrink();
+      final message = items.map((d) {
+        final title = (d['judul'] ?? d['nama'] ?? 'Pengumuman').toString();
+        final detail = (d['deskripsi'] ?? d['keterangan'] ?? '').toString();
+        return detail.trim().isEmpty ? title : '$title: $detail';
+      }).join('     •     ');
+      return Material(
+        color: Colors.white,
+        elevation: 5,
+        shadowColor: const Color(0x33167547),
+        borderRadius: BorderRadius.circular(24),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: () => showModalBottomSheet<void>(
+            context: context, isScrollControlled: true, showDragHandle: true,
+            builder: (ctx) => SafeArea(child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: SingleChildScrollView(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: items.map((d) => ListTile(
+                  title: Text((d['judul'] ?? d['nama'] ?? 'Pengumuman').toString()),
+                  subtitle: Text((d['deskripsi'] ?? d['keterangan'] ?? '').toString()),
+                )).toList(),
+              )),
+            )),
+          ),
+          child: Container(
+            height: 66,
+            padding: const EdgeInsets.symmetric(horizontal: 13),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), border: Border.all(color: const Color(0xFFE5EEE8))),
+            child: Row(children: [
+              Container(width: 38, height: 38, decoration: const BoxDecoration(color: Color(0xFF167C55), shape: BoxShape.circle), child: const Icon(Icons.campaign_rounded, color: Colors.white)),
+              const SizedBox(width: 11),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+                const Text('PENGUMUMAN KAMPUNG', style: TextStyle(color: Color(0xFF167C55), fontWeight: FontWeight.w800, fontSize: 9, letterSpacing: .5)),
+                const SizedBox(height: 4),
+                Expanded(child: Align(alignment: Alignment.centerLeft, child: _MarqueeText(text: message))),
+              ])),
+              const SizedBox(width: 5), const Icon(Icons.chevron_right, color: Colors.black45),
+            ]),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class _MarqueeText extends StatefulWidget {
@@ -1537,7 +1444,8 @@ class StatCard extends StatelessWidget {
 }
 
 class ModulesPage extends StatelessWidget {
-  const ModulesPage({super.key});
+  final bool isAdmin;
+  const ModulesPage({super.key, this.isAdmin = false});
   @override
   Widget build(BuildContext context) => ListView(
         padding: const EdgeInsets.all(16),
@@ -1554,7 +1462,7 @@ class ModulesPage extends StatelessWidget {
                   subtitle: Text(m.subtitle),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => ModulePage(module: m, isAdmin: false),
+                    builder: (_) => ModulePage(module: m, isAdmin: isAdmin),
                   )),
                 ),
               )),
@@ -1799,6 +1707,9 @@ class ModulePage extends StatelessWidget {
     }
     if (module.keyName == 'ronda') {
       return RondaSchedulePage(isAdmin: isAdmin);
+    }
+    if (module.keyName == 'informasi_diri') {
+      return const InformasiDiriPage();
     }
     final canEdit = isAdmin;
     if (module.privateData && !canEdit) {
@@ -2466,9 +2377,9 @@ class _ProfilePageState extends State<ProfilePage> {
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.edit_outlined),
-            title: const Text('Edit data diri'),
+            title: const Text('Informasi Diri dari Sensus'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => EditProfilePage(user: widget.user, profile: profile))),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const InformasiDiriPage())),
           ),
           const Divider(height: 1),
           if (widget.isAdmin)
@@ -2497,6 +2408,23 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
+class InformasiDiriPage extends StatefulWidget {
+  const InformasiDiriPage({super.key});
+  @override State<InformasiDiriPage> createState()=>_InformasiDiriPageState();
+}
+class _InformasiDiriPageState extends State<InformasiDiriPage>{
+  static const locked={'nama','nik','noKK','role','roles','wargaId','accountUid','createdAt','createdBy','updatedAt','updatedBy','akunStatus'};
+  Future<void> edit(Map<String,dynamic> data,String wargaId) async {
+    final editable=data.entries.where((e)=>!locked.contains(e.key)&&e.value is String).toList();
+    final controllers={for(final e in editable)e.key:TextEditingController(text:e.value.toString())};
+    final labels={'jenisKelamin':'Jenis kelamin','tempatLahir':'Tempat lahir','tanggalLahir':'Tanggal lahir','telepon':'Nomor HP / WhatsApp','agama':'Agama','statusPerkawinan':'Status perkawinan','pendidikan':'Pendidikan','pekerjaan':'Pekerjaan','hubunganKeluarga':'Hubungan keluarga','kawil':'Kawil / Dusun','rw':'RW','rt':'RT','alamat':'Alamat'};
+    bool busy=false;
+    await showModalBottomSheet(context:context,isScrollControlled:true,builder:(ctx)=>StatefulBuilder(builder:(ctx,setSheet)=>Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx).viewInsets.bottom),child:Column(mainAxisSize:MainAxisSize.min,children:[Padding(padding:const EdgeInsets.all(16),child:Text('Perbarui Informasi Diri',style:Theme.of(ctx).textTheme.titleLarge)),Flexible(child:ListView(shrinkWrap:true,padding:const EdgeInsets.all(16),children:editable.map((e)=>Padding(padding:const EdgeInsets.only(bottom:10),child:TextField(controller:controllers[e.key],maxLines:1,decoration:InputDecoration(labelText:labels[e.key]??e.key))).toList())),),Padding(padding:const EdgeInsets.all(16),child:FilledButton(onPressed:busy?null:()async{setSheet(()=>busy=true);try{final changes=<String,dynamic>{for(final e in controllers.entries)e.key:e.value.text.trim(),'updatedAt':FieldValue.serverTimestamp()};await Db.module('sensus').doc(wargaId).update(changes);if(ctx.mounted)Navigator.pop(ctx);if(context.mounted)showMessage(context,'Informasi diri berhasil diperbarui.');}catch(e){if(context.mounted)showMessage(context,'Gagal memperbarui data: $e');}finally{if(ctx.mounted)setSheet(()=>busy=false);}},child:busy?const CircularProgressIndicator():const Text('Simpan Perubahan')))]))));
+    for(final c in controllers.values){c.dispose();}
+  }
+  @override Widget build(BuildContext context){final user=Db.auth.currentUser; if(user==null)return const Scaffold(body:Center(child:Text('Silakan login kembali.')));return Scaffold(appBar:AppBar(title:const Text('Informasi Diri')),body:StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.user(user.uid).snapshots(),builder:(context,userSnap){if(!userSnap.hasData)return const Center(child:CircularProgressIndicator());final profile=userSnap.data!.data()??{};final wargaId=(profile['wargaId']??'').toString();if(wargaId.isEmpty)return const Center(child:Padding(padding:EdgeInsets.all(24),child:Text('Akun ini belum terhubung dengan data Sensus. Silakan hubungi Admin/Owner.')));return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.module('sensus').doc(wargaId).snapshots(),builder:(context,snap){if(snap.hasError)return Center(child:Text('Gagal memuat Sensus: ${snap.error}'));if(!snap.hasData)return const Center(child:CircularProgressIndicator());final data=snap.data!.data();if(data==null)return const Center(child:Text('Data Sensus milik akun ini tidak ditemukan.'));final entries=data.entries.where((e)=>!{'roles','role','accountUid','wargaId','createdAt','createdBy','updatedAt','updatedBy'}.contains(e.key));final roles=(profile['roles'] is List)?(profile['roles'] as List).join(', '):(profile['role']??'warga').toString();return ListView(padding:const EdgeInsets.all(16),children:[Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFFEAF4ED),borderRadius:BorderRadius.circular(16)),child:const Text('Data ini terhubung langsung dengan Sensus Penduduk. Nama asli, NIK, Nomor KK, dan Role dikunci untuk menjaga keakuratan identitas.')),const SizedBox(height:12),Card(child:ListTile(title:const Text('Role / Hak Akses'),subtitle:Text(roles),trailing:const Icon(Icons.lock_outline))),...entries.map((e){final isLocked={'nama','nik','noKK'}.contains(e.key);final labels={'nama':'Nama Asli','nik':'NIK','noKK':'Nomor KK','jenisKelamin':'Jenis kelamin','tempatLahir':'Tempat lahir','tanggalLahir':'Tanggal lahir','telepon':'Nomor HP / WhatsApp','agama':'Agama','statusPerkawinan':'Status perkawinan','pendidikan':'Pendidikan','pekerjaan':'Pekerjaan','hubunganKeluarga':'Hubungan keluarga','kawil':'Kawil / Dusun','rw':'RW','rt':'RT','alamat':'Alamat'};return Card(child:ListTile(title:Text(labels[e.key]??e.key),subtitle:Text(e.value.toString().isEmpty?'Belum diisi':e.value.toString()),trailing:isLocked?const Icon(Icons.lock_outline,size:18):null));}),const SizedBox(height:12),FilledButton.icon(onPressed:()=>edit(data,wargaId),icon:const Icon(Icons.edit_outlined),label:const Text('Edit / Perbarui Data'))]);});}));}
+}
+
 class EditProfilePage extends StatefulWidget {
   final User user;
   final Map<String, dynamic> profile;
@@ -2515,7 +2443,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
     setState(() => busy = true);
     try {
       await Db.user(widget.user.uid).update({
-        'nama': name.text.trim(),
         'telepon': phone.text.trim(),
         'alamat': address.text.trim(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -2535,7 +2462,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: const Text('Edit data diri')),
         body: ListView(padding: const EdgeInsets.all(18), children: [
-          TextField(controller: name, decoration: const InputDecoration(labelText: 'Nama lengkap')),
+          TextFormField(initialValue: (widget.profile['nama'] ?? '').toString(), readOnly: true, decoration: const InputDecoration(labelText: 'Nama asli (terkunci)')),
           const SizedBox(height: 12),
           TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Nomor WhatsApp')),
           const SizedBox(height: 12),

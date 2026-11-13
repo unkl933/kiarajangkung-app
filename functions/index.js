@@ -48,6 +48,33 @@ async function sendScheduleMessage(data, title, body) {
   }
 }
 
+// Statistik publik tanpa membuka seluruh dokumen Sensus kepada warga.
+async function rebuildPopulationStats(kampungId) {
+  const snap = await db.collection('kampung').doc(kampungId).collection('sensus').get();
+  let lakiLaki = 0;
+  let perempuan = 0;
+  const kk = new Set();
+  for (const doc of snap.docs) {
+    const d = doc.data();
+    const gender = String(d.jenisKelamin || '').toLowerCase();
+    if (gender.includes('laki') || gender === 'l') lakiLaki++;
+    if (gender.includes('perempuan') || gender === 'p') perempuan++;
+    const noKK = String(d.noKK || '').trim();
+    if (noKK) kk.add(noKK);
+  }
+  await db.collection('kampung').doc(kampungId).collection('statistik').doc('penduduk').set({
+    totalPenduduk: snap.size, lakiLaki, perempuan, totalKK: kk.size,
+    diperbaruiPada: admin.firestore.FieldValue.serverTimestamp()
+  }, { merge: true });
+}
+exports.updatePopulationStats = onDocumentWritten('kampung/{kampungId}/sensus/{residentId}', async event => {
+  await rebuildPopulationStats(event.params.kampungId);
+});
+// Backfill awal dan pemeriksaan berkala agar statistik awal tetap terisi.
+exports.refreshPopulationStatsDaily = onSchedule({ schedule: 'every 24 hours', timeZone: 'Asia/Jakarta' }, async () => {
+  await rebuildPopulationStats('kiarajangkung');
+});
+
 exports.rondaScheduleChanged = onDocumentWritten('kampung/{kampungId}/ronda/{scheduleId}', async event => {
   const after = event.data?.after?.data();
   if (!after) return;
@@ -58,8 +85,8 @@ exports.rondaScheduleChanged = onDocumentWritten('kampung/{kampungId}/ronda/{sch
 });
 
 exports.rondaReminders = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Asia/Jakarta' }, async () => {
-  const now = new Date(); // waktu absolut server
-  const nowJakarta = new Date(now.getTime() + 7 * 60 * 60 * 1000); // jam dinding WIB
+  const now = new Date();
+  const nowJakarta = new Date(now.getTime() + 7 * 60 * 60 * 1000);
   const snap = await db.collection('kampung').doc('kiarajangkung').collection('ronda').get();
   for (const doc of snap.docs) {
     const d = doc.data();
