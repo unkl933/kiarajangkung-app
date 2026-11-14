@@ -66,6 +66,201 @@ class Db {
       firestore.collection('users').doc(uid);
 }
 
+String normalizeNik(String value) => value.replaceAll(RegExp(r'\D'), '');
+
+String _wilayahSlug(String value) => value.trim().toLowerCase()
+    .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+    .replaceAll(RegExp(r'^-+|-+$'), '');
+
+String _wilayahId(String level, String parentId, String label, {String? oldLabel, String? oldId}) {
+  if (label.trim().isEmpty) return '';
+  if ((oldId ?? '').trim().isNotEmpty && (oldLabel ?? '').trim().toLowerCase() == label.trim().toLowerCase()) return oldId!;
+  final parent = parentId.trim().isEmpty ? '' : '${parentId.trim()}-';
+  return '${level.toUpperCase()}-$parent${_wilayahSlug(label)}';
+}
+
+bool isArchivedResident(Map<String, dynamic> data) {
+  final status = (data['statusWarga'] ?? 'Aktif').toString().trim().toLowerCase();
+  return status == 'arsip' || status == 'nonaktif' || status == 'pindah' || status == 'meninggal';
+}
+
+Future<List<Map<String, dynamic>>> loadActiveResidents() async {
+  final snapshot = await Db.module('sensus').get();
+  final residents = snapshot.docs
+      .map((doc) => <String, dynamic>{...doc.data(), 'wargaId': doc.id})
+      .where((data) => !isArchivedResident(data) &&
+          (data['nama'] ?? '').toString().trim().isNotEmpty)
+      .toList();
+  residents.sort((a, b) => (a['nama'] ?? '').toString().toLowerCase()
+      .compareTo((b['nama'] ?? '').toString().toLowerCase()));
+  return residents;
+}
+
+Map<String, dynamic>? resolveResident(
+  List<Map<String, dynamic>> residents, String? wargaId, String? legacyName) {
+  if (wargaId != null && wargaId.trim().isNotEmpty) {
+    for (final resident in residents) {
+      if ((resident['wargaId'] ?? '').toString() == wargaId) return resident;
+    }
+  }
+  final name = (legacyName ?? '').trim().toLowerCase();
+  if (name.isEmpty) return null;
+  final matches = residents.where((r) =>
+      (r['nama'] ?? '').toString().trim().toLowerCase() == name).toList();
+  return matches.length == 1 ? matches.first : null;
+}
+
+Future<Map<String, dynamic>?> showResidentPicker(
+  BuildContext context,
+  List<Map<String, dynamic>> residents, {
+  String? selectedWargaId,
+  String title = 'Pilih warga dari Sensus',
+}) async {
+  final search = TextEditingController();
+  final result = await showModalBottomSheet<Map<String, dynamic>>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (ctx) => StatefulBuilder(builder: (ctx, setStateSheet) {
+      final query = search.text.trim().toLowerCase();
+      final filtered = residents.where((r) {
+        final name = (r['nama'] ?? '').toString().toLowerCase();
+        final nik = (r['nik'] ?? '').toString();
+        final rt = (r['rt'] ?? '').toString();
+        final rw = (r['rw'] ?? '').toString();
+        return query.isEmpty || name.contains(query) || nik.contains(query) ||
+            rt.toLowerCase().contains(query) || rw.toLowerCase().contains(query);
+      }).toList();
+      return SafeArea(child: SizedBox(
+        height: MediaQuery.of(ctx).size.height * .78,
+        child: Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 12), child: Column(
+          children: [
+            Text(title, style: Theme.of(ctx).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            TextField(controller: search, autofocus: true,
+              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Cari nama, NIK, RT atau RW'),
+              onChanged: (_) => setStateSheet(() {})),
+            const SizedBox(height: 8),
+            Expanded(child: filtered.isEmpty
+              ? const Center(child: Text('Warga aktif tidak ditemukan.'))
+              : ListView.builder(itemCount: filtered.length, itemBuilder: (_, i) {
+                  final r = filtered[i];
+                  final id = (r['wargaId'] ?? '').toString();
+                  final selected = id == selectedWargaId;
+                  return ListTile(
+                    leading: CircleAvatar(child: Text((r['nama'] ?? '?').toString().isNotEmpty ? (r['nama'] ?? '?').toString().substring(0, 1).toUpperCase() : '?')),
+                    title: Text((r['nama'] ?? 'Tanpa nama').toString()),
+                    subtitle: Text('NIK ${r['nik'] ?? '-'} • RT ${r['rt'] ?? '-'} / RW ${r['rw'] ?? '-'}'),
+                    trailing: selected ? const Icon(Icons.check_circle, color: Colors.green) : const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.pop(ctx, r),
+                  );
+                })),
+            Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal'))),
+          ],
+        )),
+      ));
+    }),
+  );
+  search.dispose();
+  return result;
+}
+
+Future<List<Map<String, dynamic>>?> showResidentMultiPicker(
+  BuildContext context,
+  List<Map<String, dynamic>> residents, {
+  List<String> selectedWargaIds = const [],
+  String title = 'Pilih beberapa warga',
+}) async {
+  final search = TextEditingController();
+  final selected = <String>{...selectedWargaIds};
+  final result = await showModalBottomSheet<List<Map<String, dynamic>>>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (ctx) => StatefulBuilder(builder: (ctx, setStateSheet) {
+      final query = search.text.trim().toLowerCase();
+      final filtered = residents.where((r) {
+        final name = (r['nama'] ?? '').toString().toLowerCase();
+        final nik = (r['nik'] ?? '').toString();
+        return query.isEmpty || name.contains(query) || nik.contains(query);
+      }).toList();
+      return SafeArea(child: SizedBox(
+        height: MediaQuery.of(ctx).size.height * .82,
+        child: Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 12), child: Column(children: [
+          Text(title, style: Theme.of(ctx).textTheme.titleLarge),
+          const SizedBox(height: 12),
+          TextField(controller: search, decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Cari nama atau NIK'), onChanged: (_) => setStateSheet(() {})),
+          const SizedBox(height: 8),
+          Align(alignment: Alignment.centerLeft, child: Text('Dipilih: ${selected.length} warga')),
+          Expanded(child: ListView.builder(itemCount: filtered.length, itemBuilder: (_, i) {
+            final r = filtered[i];
+            final id = (r['wargaId'] ?? '').toString();
+            return CheckboxListTile(
+              value: selected.contains(id),
+              title: Text((r['nama'] ?? 'Tanpa nama').toString()),
+              subtitle: Text('RT ${r['rt'] ?? '-'} / RW ${r['rw'] ?? '-'}'),
+              onChanged: (v) => setStateSheet(() { if (v == true) { selected.add(id); } else { selected.remove(id); } }),
+            );
+          })),
+          Row(children: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')), const Spacer(), FilledButton(onPressed: selected.isEmpty ? null : () => Navigator.pop(ctx, residents.where((r) => selected.contains((r['wargaId'] ?? '').toString())).toList()), child: const Text('Gunakan pilihan'))]),
+        ])),
+      ));
+    }),
+  );
+  search.dispose();
+  return result;
+}
+
+bool isResidentReferenceField(String moduleKey, String fieldKey) {
+  if (moduleKey == 'umkm') return fieldKey == 'pemilik';
+  if (moduleKey == 'perangkat') return false; // Nama perangkat dipilih pada judul formulir.
+  if (moduleKey == 'sarana') return fieldKey == 'pengelola';
+  if (moduleKey == 'kesenian') return fieldKey == 'ketua';
+  if (moduleKey == 'kebersihan') return fieldKey == 'petugas';
+  if (moduleKey == 'fasilitas_kesehatan') return fieldKey == 'penanggungJawab';
+  if (moduleKey == 'organisasi') return ['ketua', 'wakil', 'sekretaris', 'bendahara'].contains(fieldKey);
+  return false;
+}
+
+Future<void> writeWargaAudit({
+  required String wargaId,
+  required String modul,
+  required String aksi,
+  required String peran,
+  required String namaWarga,
+  String? recordId,
+}) async {
+  if (wargaId.trim().isEmpty) return;
+  await Db.module('riwayat_perubahan').add({
+    'wargaId': wargaId,
+    'modul': modul,
+    'recordId': recordId ?? '',
+    'aksi': aksi,
+    'peran': peran,
+    'namaWarga': namaWarga,
+    'uid': Db.auth.currentUser?.uid ?? '',
+    'waktu': FieldValue.serverTimestamp(),
+  });
+}
+
+Future<void> syncAccountProfileFromSensus(String wargaId, Map<String, dynamic> data, {bool selfEdit = false}) async {
+  final uid = (data['accountUid'] ?? '').toString();
+  if (uid.isEmpty) return;
+  final updates = <String, dynamic>{'updatedAt': FieldValue.serverTimestamp()};
+  if (data.containsKey('telepon')) updates['telepon'] = data['telepon'];
+  if (data.containsKey('alamat')) updates['alamat'] = data['alamat'];
+  if (!selfEdit) {
+    if (data.containsKey('nama')) updates['nama'] = data['nama'];
+    if (data.containsKey('rt')) updates['rt'] = data['rt'];
+    if (data.containsKey('rw')) updates['rw'] = data['rw'];
+    if (data.containsKey('kawil')) updates['kawil'] = data['kawil'];
+    if (data.containsKey('kawilId')) updates['kawilId'] = data['kawilId'];
+    if (data.containsKey('rwId')) updates['rwId'] = data['rwId'];
+    if (data.containsKey('rtId')) updates['rtId'] = data['rtId'];
+  }
+  await Db.user(uid).update(updates);
+}
+
 class PushService {
   static final Set<String> _registered = <String>{};
   static Future<void> register(User user) async {
@@ -196,9 +391,13 @@ class PhotoService {
     required String nama,
     required String tanggalLahir,
     String telepon = '',
+    String alamat = '',
     String rt = '',
     String rw = '',
     String kawil = '',
+    String kawilId = '',
+    String rwId = '',
+    String rtId = '',
     String wargaId = '',
     List<String> roles = const ['warga'],
   }) async {
@@ -208,9 +407,13 @@ class PhotoService {
       'nama': nama,
       'tanggalLahir': tanggalLahir,
       'telepon': telepon,
+      'alamat': alamat,
       'rt': rt,
       'rw': rw,
       'kawil': kawil,
+      'kawilId': kawilId,
+      'rwId': rwId,
+      'rtId': rtId,
       'wargaId': wargaId,
       'roles': roles,
     });
@@ -556,6 +759,8 @@ const modules = <ModuleInfo>[
   ModuleInfo('galeri', 'Galeri Kampung', 'Dokumentasi kegiatan kampung', Icons.photo_library_outlined),
   ModuleInfo('informasi_diri', 'Informasi Diri', 'Data pribadi sesuai Sensus Penduduk', Icons.person_pin_outlined),
   ModuleInfo('sensus', 'Sensus Penduduk', 'Data keluarga dan demografi', Icons.groups_outlined, privateData: true),
+  ModuleInfo('arsip_warga', 'Arsip Warga', 'Warga pindah atau meninggal; riwayat tetap tersimpan', Icons.archive_outlined, privateData: true),
+  ModuleInfo('migrasi_satu_data', 'Migrasi Satu Data Warga', 'Hubungkan data modul lama dengan Data Sensus', Icons.hub_outlined, privateData: true),
   ModuleInfo('perangkat', 'Perangkat Kampung', 'Kadus, RW, RT, kader dan DKM', Icons.badge_outlined),
   ModuleInfo('ronda', 'Jadwal Ronda', 'Jadwal dan informasi siskamling', Icons.nightlight_outlined),
   ModuleInfo('kontak_darurat', 'Kontak Darurat', 'Babinsa, Bhabinkamtibmas dan layanan', Icons.emergency_outlined),
@@ -1349,7 +1554,7 @@ class _DashboardPopulationStatsState extends State<DashboardPopulationStats> {
   }
 
   Map<String, int> _count(Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
-    final list = docs.toList();
+    final list = docs.where((d) => !isArchivedResident(d.data())).toList();
     final male = list.where((d) => ['laki-laki','laki laki','l','pria'].contains((d.data()['jenisKelamin'] ?? '').toString().trim().toLowerCase())).length;
     final female = list.where((d) => ['perempuan','wanita','p'].contains((d.data()['jenisKelamin'] ?? '').toString().trim().toLowerCase())).length;
     final kk = list.map((d) => (d.data()['noKK'] ?? '').toString().trim()).where((v) => v.isNotEmpty).toSet().length;
@@ -1601,7 +1806,7 @@ class ModulesPage extends StatelessWidget {
         children: [
           Text('Informasi & Layanan', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
-          ...modules.map((m) => Card(
+          ...modules.where((m) => isAdmin || !['arsip_warga', 'migrasi_satu_data'].contains(m.keyName)).map((m) => Card(
                 child: ListTile(
                   leading: CircleAvatar(
                     backgroundColor: Theme.of(context).colorScheme.primaryContainer,
@@ -1860,6 +2065,8 @@ class ModulePage extends StatelessWidget {
     if (module.keyName == 'informasi_diri') {
       return const InformasiDiriPage();
     }
+    if (module.keyName == 'arsip_warga') return ArchivedResidentsPage(isAdmin: isAdmin);
+    if (module.keyName == 'migrasi_satu_data') return MigrasiSatuDataPage(isAdmin: isAdmin);
     final canEdit = isAdmin;
     if (module.privateData && !canEdit) {
       return Scaffold(
@@ -1888,13 +2095,17 @@ class ModulePage extends StatelessWidget {
           if (snapshot.data!.docs.isEmpty) {
             return const Center(child: Text('Belum ada data. Informasi akan ditampilkan di sini.'));
           }
+          final visibleDocs = module.keyName == 'sensus'
+              ? snapshot.data!.docs.where((d) => !isArchivedResident(d.data())).toList()
+              : snapshot.data!.docs;
+          if (visibleDocs.isEmpty) return const Center(child: Text('Belum ada data aktif. Data yang diarsipkan dapat dilihat di menu Arsip Warga.'));
           return ListView.builder(
             primary: true,
             physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
-            itemCount: snapshot.data!.docs.length,
+            itemCount: visibleDocs.length,
             itemBuilder: (context, index) {
-              final doc = snapshot.data!.docs[index];
+              final doc = visibleDocs[index];
               final data = doc.data();
               final title = (data['judul'] ?? data['nama'] ?? data['nama_usaha'] ?? data['nama_lengkap'] ?? 'Data kampung').toString();
               final desc = (data['deskripsi'] ?? data['keterangan'] ?? data['alamat'] ?? '').toString();
@@ -1926,6 +2137,8 @@ class ModulePage extends StatelessWidget {
                             Padding(padding: const EdgeInsets.only(top: 4), child: Text(
                               (data['kategori'] ?? data['jenisFasilitas'] ?? data['jenisUsaha']).toString(),
                               style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 12, fontWeight: FontWeight.w600))),
+                          if (module.keyName == 'sensus' && isArchivedResident(data))
+                            Padding(padding: const EdgeInsets.only(top: 5), child: Text('ARSIP • ${data['statusArsip'] ?? 'Warga tidak aktif'}', style: const TextStyle(color: Colors.deepOrange, fontSize: 11, fontWeight: FontWeight.bold))),
                           if (desc.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text(
                             desc, maxLines: 2, overflow: TextOverflow.ellipsis,
                             style: TextStyle(color: Colors.grey.shade700, height: 1.3))),
@@ -1942,7 +2155,7 @@ class ModulePage extends StatelessWidget {
                           onSelected: (v) async {
                             if (v == 'edit') {
                               showRecordForm(context, module, isAdmin: canEdit, isChair: isChairForRecord && !canEdit, docId: doc.id, initial: data);
-                            } else if (v == 'delete' && canEdit) {
+                            } else if (v == 'delete' && canEdit && module.keyName != 'sensus') {
                               final yes = await confirmDelete(context);
                               if (yes == true) {
                                 await PhotoService.deleteIfOwned(photo);
@@ -1951,10 +2164,12 @@ class ModulePage extends StatelessWidget {
                             }
                           },
                           itemBuilder: (_) => canEdit
-                              ? const [
-                                  PopupMenuItem(value: 'edit', child: Text('Edit')),
-                                  PopupMenuItem(value: 'delete', child: Text('Hapus')),
-                                ]
+                              ? (module.keyName == 'sensus'
+                                  ? const [PopupMenuItem(value: 'edit', child: Text('Edit / Arsipkan'))]
+                                  : const [
+                                      PopupMenuItem(value: 'edit', child: Text('Edit')),
+                                      PopupMenuItem(value: 'delete', child: Text('Hapus')),
+                                    ])
                               : const [PopupMenuItem(value: 'edit', child: Text('Edit organisasi'))],
                         ) else const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.arrow_forward_ios, size: 16)),
                       ]),
@@ -2035,6 +2250,14 @@ List<ModuleField> fieldsForModule(String key) {
         ModuleField('tempatLahir', 'Tempat lahir'),
         ModuleField('tanggalLahir', 'Tanggal lahir', hint: 'DD-MM-YYYY (wajib untuk akun awal)', required: true),
         ModuleField('telepon', 'Nomor WhatsApp', keyboard: TextInputType.phone),
+        ModuleField('alamat', 'Alamat lengkap'),
+        ModuleField('agama', 'Agama'),
+        ModuleField('kewarganegaraan', 'Kewarganegaraan'),
+        ModuleField('golonganDarah', 'Golongan darah'),
+        ModuleField('kodePos', 'Kode pos', keyboard: TextInputType.number),
+        ModuleField('namaAyah', 'Nama ayah'),
+        ModuleField('namaIbu', 'Nama ibu'),
+        ModuleField('statusDalamKeluarga', 'Status dalam keluarga'),
         ModuleField('statusPerkawinan', 'Status perkawinan'),
         ModuleField('pendidikan', 'Pendidikan'),
         ModuleField('pekerjaan', 'Pekerjaan'),
@@ -2042,6 +2265,10 @@ List<ModuleField> fieldsForModule(String key) {
         ModuleField('kawil', 'Kawil / Dusun'),
         ModuleField('rw', 'RW'),
         ModuleField('rt', 'RT'),
+        ModuleField('statusWarga', 'Status warga', hint: 'Aktif / Arsip'),
+        ModuleField('statusArsip', 'Alasan arsip', hint: 'Pindah / Meninggal'),
+        ModuleField('tanggalArsip', 'Tanggal arsip', hint: 'DD-MM-YYYY'),
+        ModuleField('alamatTujuan', 'Alamat tujuan jika pindah'),
       ];
     case 'perangkat':
       return const [
@@ -2127,6 +2354,7 @@ List<ModuleField> fieldsForModule(String key) {
     case 'fasilitas_kesehatan':
       return const [
         ModuleField('jenisFasilitas', 'Jenis fasilitas', hint: 'Klinik / Puskesmas Desa / Puskesmas Kecamatan / Apotek', required: true),
+        ModuleField('penanggungJawab', 'Penanggung jawab'),
         ModuleField('alamat', 'Alamat'),
         ModuleField('lokasiMaps', 'Link Google Maps', hint: 'https://maps.google.com/...'),
         ModuleField('telepon', 'Nomor telepon / WhatsApp', keyboard: TextInputType.phone),
@@ -2161,6 +2389,18 @@ List<ModuleField> fieldsForModule(String key) {
   }
 }
 
+List<String> definitionsForResidentPicker(String moduleKey) {
+  switch (moduleKey) {
+    case 'umkm': return ['pemilik'];
+    case 'sarana': return ['pengelola'];
+    case 'kesenian': return ['ketua'];
+    case 'kebersihan': return ['petugas'];
+    case 'fasilitas_kesehatan': return ['penanggungJawab'];
+    case 'organisasi': return ['ketua', 'wakil', 'sekretaris', 'bendahara'];
+    default: return const [];
+  }
+}
+
 Future<void> showRecordForm(
   BuildContext context,
   ModuleInfo module, {
@@ -2181,6 +2421,42 @@ Future<void> showRecordForm(
       ? List<String>.from((initial!['roles'] as List).map((e) => e.toString()))
       : <String>['warga'];
   final selectedRoles = <String>{...initialRoles, 'warga'};
+  final usesResidentPicker = isAdmin && (module.keyName == 'perangkat' ||
+      definitionsForResidentPicker(module.keyName).isNotEmpty);
+  List<Map<String, dynamic>> residentOptions = <Map<String, dynamic>>[];
+  if (usesResidentPicker) {
+    try {
+      residentOptions = await loadActiveResidents();
+    } catch (e) {
+      if (context.mounted) showMessage(context, 'Gagal mengambil Data Sensus: $e');
+      return;
+    }
+  }
+  final selectedResidents = <String, Map<String, dynamic>>{};
+  for (final fieldKey in definitionsForResidentPicker(module.keyName)) {
+    final id = (initial?['${fieldKey}WargaId'] ?? '').toString();
+    final name = (initial?[fieldKey] ?? '').toString();
+    final found = resolveResident(residentOptions, id, name);
+    if (found != null) selectedResidents[fieldKey] = found;
+  }
+  Map<String, dynamic>? selectedTitleResident;
+  if (module.keyName == 'perangkat') {
+    selectedTitleResident = resolveResident(residentOptions,
+      (initial?['pemegangJabatanWargaId'] ?? initial?['wargaId'] ?? '').toString(),
+      (initial?['nama'] ?? initial?['judul'] ?? '').toString());
+  }
+  List<Map<String, dynamic>> selectedOrganizationMembers = <Map<String, dynamic>>[];
+  bool organizationMembersTouched = false;
+  final existingMembers = initial?['anggotaWarga'];
+  if (existingMembers is List) {
+    for (final item in existingMembers) {
+      if (item is Map) {
+        final found = resolveResident(residentOptions,
+          (item['wargaId'] ?? '').toString(), (item['nama'] ?? '').toString());
+        if (found != null) selectedOrganizationMembers.add(found);
+      }
+    }
+  }
   final title = TextEditingController(
     text: (initial?['judul'] ?? initial?['nama'] ?? initial?['nama_usaha'] ?? '').toString(),
   );
@@ -2189,6 +2465,9 @@ Future<void> showRecordForm(
     for (final field in definitions)
       field.key: TextEditingController(text: (initial?[field.key] ?? '').toString()),
   };
+  if (module.keyName == 'sensus' && (controllers['statusWarga']?.text ?? '').trim().isEmpty) {
+    controllers['statusWarga']?.text = 'Aktif';
+  }
   final formKey = GlobalKey<FormState>();
   final photoController = TextEditingController(
     text: (initial?['fotoUrl'] ?? initial?['foto'] ?? initial?['imageUrl'] ?? '').toString(),
@@ -2221,33 +2500,97 @@ Future<void> showRecordForm(
                   Text(docId == null ? 'Tambah ${module.title}' : 'Edit ${module.title}',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
-                  TextFormField(
-                    controller: title,
-                    validator: (v) => v == null || v.trim().isEmpty ? 'Nama/judul wajib diisi' : null,
-                    decoration: InputDecoration(
-                      labelText: module.keyName == 'sensus' ? 'Nama lengkap warga' :
-                        module.keyName == 'umkm' ? 'Nama usaha' :
-                        module.keyName == 'kebersihan' ? 'Nama layanan' :
-                        module.keyName == 'fasilitas_kesehatan' ? 'Nama fasilitas kesehatan' : 'Nama / Judul',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  ...definitions.where((field) => field.key != 'fotoUrl' && !(isChair && field.key == 'ketuaUid')).map((field) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: TextFormField(
-                      controller: controllers[field.key],
-                      keyboardType: field.keyboard,
-                      maxLines: field.lines,
-                      validator: field.required
-                          ? (v) => v == null || v.trim().isEmpty ? '${field.label} wajib diisi' : null
-                          : null,
+                  if (module.keyName == 'perangkat')
+                    Padding(padding: const EdgeInsets.only(bottom: 10), child: OutlinedButton.icon(
+                      icon: const Icon(Icons.person_search_outlined),
+                      onPressed: () async {
+                        final picked = await showResidentPicker(sheetContext, residentOptions,
+                          selectedWargaId: (selectedTitleResident?['wargaId'] ?? '').toString(),
+                          title: 'Pilih perangkat dari Sensus');
+                        if (picked != null) setSheetState(() {
+                          selectedTitleResident = picked;
+                          title.text = (picked['nama'] ?? '').toString();
+                        });
+                      },
+                      label: Text(selectedTitleResident == null ? 'Pilih nama perangkat dari Sensus' : 'Nama: ${selectedTitleResident!['nama']}'),
+                    ))
+                  else
+                    TextFormField(
+                      controller: title,
+                      validator: (v) => v == null || v.trim().isEmpty ? 'Nama/judul wajib diisi' : null,
                       decoration: InputDecoration(
-                        labelText: field.label,
-                        hintText: field.hint.isEmpty ? null : field.hint,
-                        alignLabelWithHint: field.lines > 1,
+                        labelText: module.keyName == 'sensus' ? 'Nama lengkap warga' :
+                          module.keyName == 'umkm' ? 'Nama usaha' :
+                          module.keyName == 'kebersihan' ? 'Nama layanan' :
+                          module.keyName == 'fasilitas_kesehatan' ? 'Nama fasilitas kesehatan' : 'Nama / Judul',
                       ),
                     ),
-                  )),
+                  const SizedBox(height: 10),
+                  ...definitions.where((field) => field.key != 'fotoUrl' && field.key != 'ketuaUid' &&
+                      !(module.keyName == 'sensus' && ['statusArsip','tanggalArsip','alamatTujuan'].contains(field.key) && (controllers['statusWarga']?.text ?? 'Aktif') != 'Arsip')).map((field) {
+                    if (isAdmin && module.keyName == 'organisasi' && field.key == 'anggota') {
+                      return Padding(padding: const EdgeInsets.only(bottom: 10), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(field.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 6),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.group_add_outlined),
+                          onPressed: () async {
+                            final picked = await showResidentMultiPicker(sheetContext, residentOptions,
+                              selectedWargaIds: selectedOrganizationMembers.map((e) => (e['wargaId'] ?? '').toString()).toList());
+                            if (picked != null) setSheetState(() { selectedOrganizationMembers = picked; organizationMembersTouched = true; });
+                          },
+                          label: Text('Pilih anggota dari Sensus (${selectedOrganizationMembers.length})'),
+                        ),
+                      ]));
+                    }
+                    if (isAdmin && isResidentReferenceField(module.keyName, field.key)) {
+                      final selected = selectedResidents[field.key];
+                      return Padding(padding: const EdgeInsets.only(bottom: 10), child: OutlinedButton.icon(
+                        icon: const Icon(Icons.person_search_outlined),
+                        onPressed: () async {
+                          final picked = await showResidentPicker(sheetContext, residentOptions,
+                            selectedWargaId: (selected?['wargaId'] ?? '').toString(),
+                            title: 'Pilih ${field.label.toLowerCase()} dari Sensus');
+                          if (picked != null) setSheetState(() {
+                            selectedResidents[field.key] = picked;
+                            controllers[field.key]?.text = (picked['nama'] ?? '').toString();
+                            if (['umkm', 'kebersihan', 'perangkat', 'organisasi'].contains(module.keyName) &&
+                                (controllers['telepon']?.text ?? '').trim().isEmpty) {
+                              controllers['telepon']?.text = (picked['telepon'] ?? '').toString();
+                            }
+                          });
+                        },
+                        label: Text(selected != null ? '${field.label}: ${selected['nama']}' : ((initial?['${field.key}WargaId'] ?? '').toString().isNotEmpty ? '${field.label} tersimpan: ${initial?[field.key]} (pilih pengganti bila perlu)' : 'Pilih ${field.label} dari Sensus')),
+                      ));
+                    }
+                    if (module.keyName == 'sensus' && field.key == 'statusWarga') {
+                      final current = (controllers[field.key]?.text ?? '').trim();
+                      final value = ['arsip','nonaktif','pindah','meninggal'].contains(current.toLowerCase()) ? 'Arsip' : 'Aktif';
+                      return Padding(padding: const EdgeInsets.only(bottom: 10), child: DropdownButtonFormField<String>(
+                        value: value,
+                        decoration: InputDecoration(labelText: field.label),
+                        items: const [DropdownMenuItem(value: 'Aktif', child: Text('Aktif')), DropdownMenuItem(value: 'Arsip', child: Text('Arsip'))],
+                        onChanged: (v) => setSheetState(() { controllers[field.key]!.text = v ?? 'Aktif'; }),
+                      ));
+                    }
+                    if (module.keyName == 'sensus' && field.key == 'statusArsip') {
+                      final current = (controllers[field.key]?.text ?? '').trim();
+                      final legacyStatus = (initial?['statusWarga'] ?? '').toString().trim();
+                      final archiveReason = current.isNotEmpty ? current : (['Pindah','Meninggal'].contains(legacyStatus) ? legacyStatus : null);
+                      return Padding(padding: const EdgeInsets.only(bottom: 10), child: DropdownButtonFormField<String>(
+                        value: ['Pindah', 'Meninggal'].contains(archiveReason) ? archiveReason : null,
+                        decoration: InputDecoration(labelText: field.label),
+                        items: const [DropdownMenuItem(value: 'Pindah', child: Text('Pindah')), DropdownMenuItem(value: 'Meninggal', child: Text('Meninggal'))],
+                        onChanged: (v) => setSheetState(() { controllers[field.key]!.text = v ?? ''; }),
+                      ));
+                    }
+                    return Padding(padding: const EdgeInsets.only(bottom: 10), child: TextFormField(
+                      controller: controllers[field.key], keyboardType: field.keyboard, maxLines: field.lines,
+                      readOnly: module.keyName == 'sensus' && field.key == 'nik' && docId != null,
+                      validator: field.required ? (v) => v == null || v.trim().isEmpty ? '${field.label} wajib diisi' : null : null,
+                      decoration: InputDecoration(labelText: field.label, hintText: field.hint.isEmpty ? null : field.hint, alignLabelWithHint: field.lines > 1, suffixIcon: module.keyName == 'sensus' && field.key == 'nik' && docId != null ? const Icon(Icons.lock_outline, size: 18) : null),
+                    ));
+                  }),
                   if (module.keyName == 'sensus' && isOwner && docId == null) ...[
                     const SizedBox(height: 8),
                     Card(
@@ -2363,6 +2706,42 @@ Future<void> showRecordForm(
                   FilledButton(
                     onPressed: uploadingPhoto ? null : () async {
                       if (!formKey.currentState!.validate()) return;
+                      if (module.keyName == 'perangkat' && selectedTitleResident == null &&
+                          (initial?['pemegangJabatanWargaId'] ?? initial?['wargaId'] ?? '').toString().isEmpty) {
+                        showMessage(sheetContext, 'Pilih nama perangkat dari Data Sensus.');
+                        return;
+                      }
+                      for (final field in definitions.where((f) => isAdmin && isResidentReferenceField(module.keyName, f.key))) {
+                        final existingLink = (initial?['${field.key}WargaId'] ?? '').toString();
+                        final hasLegacyName = (controllers[field.key]?.text ?? '').trim().isNotEmpty;
+                        if (selectedResidents[field.key] == null && (field.required || (existingLink.isEmpty && hasLegacyName))) {
+                          showMessage(sheetContext, 'Pilih ${field.label} dari Data Sensus agar nama tidak tersimpan tanpa wargaId.');
+                          return;
+                        }
+                      }
+                      if (module.keyName == 'sensus') {
+                        final nik = normalizeNik(controllers['nik']?.text ?? '');
+                        if (!RegExp(r'^\d{16}$').hasMatch(nik)) {
+                          showMessage(sheetContext, 'NIK harus tepat 16 digit angka.');
+                          return;
+                        }
+                        controllers['nik']!.text = nik;
+                        if ((controllers['statusWarga']?.text ?? 'Aktif') == 'Arsip' &&
+                            (controllers['statusArsip']?.text ?? '').trim().isEmpty) {
+                          showMessage(sheetContext, 'Pilih alasan arsip: Pindah atau Meninggal.');
+                          return;
+                        }
+                        if ((controllers['statusWarga']?.text ?? 'Aktif') == 'Arsip' &&
+                            (controllers['statusArsip']?.text ?? '') == 'Pindah' &&
+                            (controllers['alamatTujuan']?.text ?? '').trim().isEmpty) {
+                          showMessage(sheetContext, 'Isi alamat tujuan warga yang pindah.');
+                          return;
+                        }
+                        if (docId == null && (controllers['statusWarga']?.text ?? 'Aktif') == 'Arsip') {
+                          showMessage(sheetContext, 'Tambahkan warga sebagai Aktif terlebih dahulu, lalu arsipkan setelah data tersimpan.');
+                          return;
+                        }
+                      }
                       setSheetState(() { uploadingPhoto = true; });
                       String? newlyUploadedPhotoUrl;
                       try {
@@ -2382,6 +2761,83 @@ Future<void> showRecordForm(
                         'updatedAt': FieldValue.serverTimestamp(),
                         'updatedBy': Db.auth.currentUser?.uid,
                       };
+                      if (module.keyName == 'sensus') {
+                        payload['nik'] = normalizeNik((payload['nik'] ?? '').toString());
+                        payload['statusWarga'] = (payload['statusWarga'] ?? 'Aktif').toString().trim().isEmpty ? 'Aktif' : payload['statusWarga'];
+                        final kawilLabel = (payload['kawil'] ?? '').toString();
+                        final rwLabel = (payload['rw'] ?? '').toString();
+                        final rtLabel = (payload['rt'] ?? '').toString();
+                        final kawilId = _wilayahId('KAWIL', '', kawilLabel, oldLabel: (initial?['kawil'] ?? '').toString(), oldId: (initial?['kawilId'] ?? '').toString());
+                        final rwId = _wilayahId('RW', kawilId, rwLabel, oldLabel: (initial?['rw'] ?? '').toString(), oldId: (initial?['rwId'] ?? '').toString());
+                        final rtId = _wilayahId('RT', rwId, rtLabel, oldLabel: (initial?['rt'] ?? '').toString(), oldId: (initial?['rtId'] ?? '').toString());
+                        payload['kawilId'] = kawilId;
+                        payload['rwId'] = rwId;
+                        payload['rtId'] = rtId;
+                        if (payload['statusWarga'] == 'Arsip' && (payload['tanggalArsip'] ?? '').toString().trim().isEmpty) {
+                          final now = DateTime.now();
+                          payload['tanggalArsip'] = '${now.day.toString().padLeft(2,'0')}-${now.month.toString().padLeft(2,'0')}-${now.year}';
+                        }
+                      }
+                      if (module.keyName == 'perangkat' && selectedTitleResident != null) {
+                        final resident = selectedTitleResident!;
+                        payload['nama'] = (resident['nama'] ?? '').toString();
+                        payload['judul'] = (resident['nama'] ?? '').toString();
+                        payload['wargaId'] = resident['wargaId'];
+                        payload['pemegangJabatanWargaId'] = resident['wargaId'];
+                      }
+                      for (final entry in selectedResidents.entries) {
+                        final resident = entry.value;
+                        payload[entry.key] = (resident['nama'] ?? '').toString();
+                        payload['${entry.key}WargaId'] = resident['wargaId'];
+                        if (module.keyName == 'organisasi' && entry.key == 'ketua') {
+                          payload['ketuaUid'] = (resident['accountUid'] ?? '').toString();
+                        }
+                        if (module.keyName == 'umkm' && entry.key == 'pemilik') {
+                          // UID dipertahankan untuk kompatibilitas ringkasan UMKM di dashboard;
+                          // wargaId tetap menjadi penghubung identitas utama.
+                          payload['pemilikUid'] = (resident['accountUid'] ?? '').toString();
+                        }
+                      }
+                      if (isAdmin && module.keyName == 'organisasi' && organizationMembersTouched) {
+                        payload['anggotaWarga'] = selectedOrganizationMembers.map((r) => {
+                          'wargaId': r['wargaId'], 'nama': r['nama'],
+                        }).toList();
+                        payload['anggotaWargaIds'] = selectedOrganizationMembers.map((r) => r['wargaId']).toList();
+                        payload['anggota'] = selectedOrganizationMembers.map((r) => r['nama']).join(', ');
+                        final ketua = selectedResidents['ketua'];
+                        if (ketua != null) payload['ketuaUid'] = (ketua['accountUid'] ?? '').toString();
+                      }
+                      if (module.keyName == 'umkm') {
+                        payload['pemilikNamaSnapshot'] = payload['pemilik'];
+                        final newOwner = selectedResidents['pemilik'];
+                        if (newOwner != null) {
+                          final newOwnerId = (newOwner['wargaId'] ?? '').toString();
+                          final oldOwnerResolved = resolveResident(residentOptions,
+                            (initial?['pemilikWargaId'] ?? '').toString(), (initial?['pemilik'] ?? '').toString());
+                          final oldOwnerId = (oldOwnerResolved?['wargaId'] ?? initial?['pemilikWargaId'] ?? '').toString();
+                          final history = <Map<String, dynamic>>[];
+                          final oldHistory = initial?['riwayatPemilik'];
+                          if (oldHistory is List) {
+                            for (final item in oldHistory) { if (item is Map) history.add(Map<String, dynamic>.from(item)); }
+                          }
+                          if (docId == null) {
+                            final now = Timestamp.now();
+                            history.add({'wargaId': newOwnerId, 'nama': newOwner['nama'] ?? '', 'mulaiPada': now, 'selesaiPada': null, 'status': 'Pemilik saat ini'});
+                            payload['pemilikMulaiPada'] = now;
+                          } else if (oldOwnerId.isNotEmpty && oldOwnerId != newOwnerId) {
+                            final oldName = (oldOwnerResolved?['nama'] ?? initial?['pemilik'] ?? initial?['pemilikNamaSnapshot'] ?? '').toString();
+                            final now = Timestamp.now();
+                            history.add({'wargaId': oldOwnerId, 'nama': oldName, 'mulaiPada': initial?['pemilikMulaiPada'], 'selesaiPada': now, 'status': 'Pemilik sebelumnya'});
+                            history.add({'wargaId': newOwnerId, 'nama': newOwner['nama'] ?? '', 'mulaiPada': now, 'selesaiPada': null, 'status': 'Pemilik saat ini'});
+                            payload['pemilikMulaiPada'] = now;
+                          } else if (history.isEmpty) {
+                            final now = Timestamp.now();
+                            history.add({'wargaId': newOwnerId, 'nama': newOwner['nama'] ?? '', 'mulaiPada': now, 'selesaiPada': null, 'status': 'Pemilik saat ini'});
+                            payload['pemilikMulaiPada'] = now;
+                          }
+                          payload['riwayatPemilik'] = history;
+                        }
+                      }
                       // Field lama tetap dipertahankan agar daftar dan dashboard yang
                       // sudah ada tetap dapat membaca data dengan format sebelumnya.
                       payload['deskripsi'] ??= '';
@@ -2389,39 +2845,103 @@ Future<void> showRecordForm(
                         if (docId == null) {
                           payload['createdAt'] = FieldValue.serverTimestamp();
                           payload['createdBy'] = Db.auth.currentUser?.uid;
-                          final savedDoc = await Db.module(module.keyName).add(payload);
+                          DocumentReference<Map<String, dynamic>> savedDoc;
                           if (module.keyName == 'sensus') {
-                            final assignedRoles = isOwner
-                                ? <String>{'warga', ...selectedRoles}.toList()
-                                : <String>['warga'];
-                            await savedDoc.update({'roles': assignedRoles, 'wargaId': savedDoc.id});
+                            savedDoc = Db.module('sensus').doc();
+                            final nik = (payload['nik'] ?? '').toString();
+                            final allSensus = await Db.module('sensus').get();
+                            final duplicateDocs = allSensus.docs.where((d) => normalizeNik((d.data()['nik'] ?? '').toString()) == nik).toList();
+                            if (duplicateDocs.isNotEmpty) throw Exception('NIK sudah terdaftar atas nama ${(duplicateDocs.first.data()['nama'] ?? 'warga lain')}. Gunakan data Sensus yang sudah ada.');
+                            final indexRef = Db.firestore.collection('kampung').doc('kiarajangkung').collection('sensus_nik_index').doc(nik);
+                            await Db.firestore.runTransaction((tx) async {
+                              final indexSnap = await tx.get(indexRef);
+                              if (indexSnap.exists) throw Exception('NIK sudah digunakan oleh data warga lain.');
+                              payload['wargaId'] = savedDoc.id;
+                              payload['roles'] = isOwner ? <String>{'warga', ...selectedRoles}.toList() : <String>['warga'];
+                              tx.set(savedDoc, payload);
+                              tx.set(indexRef, {'nik': nik, 'wargaId': savedDoc.id, 'createdAt': FieldValue.serverTimestamp()});
+                            });
+                          } else {
+                            savedDoc = await Db.module(module.keyName).add(payload);
+                          }
+                          if (module.keyName == 'sensus') {
+                            final assignedRoles = isOwner ? <String>{'warga', ...selectedRoles}.toList() : <String>['warga'];
                             try {
                               final account = await PhotoService.provisionResident(
-                                nik: (payload['nik'] ?? '').toString().trim(),
-                                nama: title.text.trim(),
+                                nik: (payload['nik'] ?? '').toString().trim(), nama: title.text.trim(),
                                 tanggalLahir: (payload['tanggalLahir'] ?? '').toString().trim(),
-                                telepon: (payload['telepon'] ?? '').toString(),
-                                rt: (payload['rt'] ?? '').toString(),
-                                rw: (payload['rw'] ?? '').toString(),
-                                kawil: (payload['kawil'] ?? '').toString(),
-                                wargaId: savedDoc.id,
-                                roles: assignedRoles,
+                                telepon: (payload['telepon'] ?? '').toString(), alamat: (payload['alamat'] ?? '').toString(), rt: (payload['rt'] ?? '').toString(),
+                                rw: (payload['rw'] ?? '').toString(), kawil: (payload['kawil'] ?? '').toString(),
+                                kawilId: (payload['kawilId'] ?? '').toString(), rwId: (payload['rwId'] ?? '').toString(), rtId: (payload['rtId'] ?? '').toString(),
+                                wargaId: savedDoc.id, roles: assignedRoles,
                               );
-                              await savedDoc.update({
-                                'accountUid': (account['uid'] ?? '').toString(),
-                                'akunStatus': 'Aktif',
-                              });
-                              if (context.mounted) showMessage(context, 'Data sensus tersimpan dan akun warga berhasil dibuat. Role: ${assignedRoles.join(', ')}. Password awal tanggal lahir DDMMYYYY; wajib diganti saat login pertama.');
+                              await savedDoc.update({'accountUid': (account['uid'] ?? '').toString(), 'akunStatus': 'Aktif'});
+                              if (context.mounted) showMessage(context, 'Data Sensus tersimpan dan akun warga berhasil dibuat.');
                             } catch (accountError) {
                               await savedDoc.update({'akunStatus': 'Gagal dibuat'});
-                              if (context.mounted) showMessage(context, 'Data sensus tersimpan, tetapi akun belum berhasil dibuat: $accountError');
+                              if (context.mounted) showMessage(context, 'Data Sensus tersimpan, tetapi akun belum berhasil dibuat: $accountError');
                             }
+                            await writeWargaAudit(wargaId: savedDoc.id, modul: 'sensus', aksi: 'data warga ditambahkan', peran: 'identitas', namaWarga: title.text.trim(), recordId: savedDoc.id);
+                          }
+                          if (module.keyName == 'perangkat' && selectedTitleResident != null) {
+                            await writeWargaAudit(wargaId: (selectedTitleResident!['wargaId'] ?? '').toString(), modul: module.keyName, aksi: 'ditambahkan', peran: (payload['jabatan'] ?? '').toString(), namaWarga: (selectedTitleResident!['nama'] ?? '').toString(), recordId: savedDoc.id);
+                          }
+                          for (final entry in selectedResidents.entries) {
+                            await writeWargaAudit(wargaId: (entry.value['wargaId'] ?? '').toString(), modul: module.keyName, aksi: 'ditambahkan', peran: entry.key, namaWarga: (entry.value['nama'] ?? '').toString(), recordId: savedDoc.id);
+                          }
+                          for (final resident in selectedOrganizationMembers) {
+                            await writeWargaAudit(wargaId: (resident['wargaId'] ?? '').toString(), modul: module.keyName, aksi: 'ditambahkan sebagai anggota', peran: 'anggota', namaWarga: (resident['nama'] ?? '').toString(), recordId: savedDoc.id);
                           }
                         } else {
-                          await Db.module(module.keyName).doc(docId).update(payload);
+                          final recordRef = Db.module(module.keyName).doc(docId);
+                          if (module.keyName == 'sensus') {
+                            final nik = (payload['nik'] ?? '').toString();
+                            final oldNik = normalizeNik((initial?['nik'] ?? '').toString());
+                            final allSensus = await Db.module('sensus').get();
+                            if (allSensus.docs.any((d) => d.id != docId && normalizeNik((d.data()['nik'] ?? '').toString()) == nik)) throw Exception('NIK sudah dipakai oleh warga lain.');
+                            final newIndexRef = Db.firestore.collection('kampung').doc('kiarajangkung').collection('sensus_nik_index').doc(nik);
+                            final oldIndexRef = oldNik.isEmpty ? null : Db.firestore.collection('kampung').doc('kiarajangkung').collection('sensus_nik_index').doc(oldNik);
+                            await Db.firestore.runTransaction((tx) async {
+                              final newIndex = await tx.get(newIndexRef);
+                              final oldIndex = oldIndexRef != null && oldNik != nik ? await tx.get(oldIndexRef) : null;
+                              if (newIndex.exists && (newIndex.data()?['wargaId'] ?? '') != docId) throw Exception('NIK sudah digunakan oleh warga lain.');
+                              tx.update(recordRef, payload);
+                              tx.set(newIndexRef, {'nik': nik, 'wargaId': docId, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+                              if (oldIndexRef != null && oldNik != nik && oldIndex != null && oldIndex.exists && (oldIndex.data()?['wargaId'] ?? '') == docId) tx.delete(oldIndexRef);
+                            });
+                            final syncedData = <String, dynamic>{...?initial, ...payload, 'accountUid': initial?['accountUid'] ?? ''};
+                            await syncAccountProfileFromSensus(docId, syncedData);
+                            final accountUid = (initial?['accountUid'] ?? '').toString();
+                            if (payload['statusWarga'] == 'Arsip' && accountUid.isNotEmpty) {
+                              final accountSnap = await Db.user(accountUid).get();
+                              final accountData = accountSnap.data() ?? <String, dynamic>{};
+                              if ((accountData['status'] ?? 'Aktif') == 'Aktif') {
+                                await recordRef.update({'statusAkunSebelumArsip': 'Aktif'});
+                                await Db.user(accountUid).update({'status': 'Nonaktif', 'updatedAt': FieldValue.serverTimestamp()});
+                              }
+                            } else if (payload['statusWarga'] == 'Aktif' && initial?['statusWarga'] == 'Arsip' && accountUid.isNotEmpty && initial?['statusAkunSebelumArsip'] == 'Aktif') {
+                              await Db.user(accountUid).update({'status': 'Aktif', 'updatedAt': FieldValue.serverTimestamp()});
+                            }
+                            await writeWargaAudit(wargaId: docId, modul: 'sensus', aksi: payload['statusWarga'] == 'Arsip' && initial?['statusWarga'] != 'Arsip' ? 'warga diarsipkan' : 'data identitas diperbarui', peran: 'identitas', namaWarga: (payload['nama'] ?? '').toString(), recordId: docId);
+                          } else {
+                            await recordRef.update(payload);
+                          }
                           final oldPhoto = (initial?['fotoUrl'] ?? initial?['foto'] ?? initial?['imageUrl'] ?? '').toString();
-                          if (oldPhoto.isNotEmpty && oldPhoto != finalPhotoUrl) {
-                            await PhotoService.deleteIfOwned(oldPhoto);
+                          if (oldPhoto.isNotEmpty && oldPhoto != finalPhotoUrl) await PhotoService.deleteIfOwned(oldPhoto);
+                          if (module.keyName == 'perangkat' && selectedTitleResident != null) {
+                            await writeWargaAudit(wargaId: (selectedTitleResident!['wargaId'] ?? '').toString(), modul: module.keyName, aksi: 'diperbarui', peran: (payload['jabatan'] ?? '').toString(), namaWarga: (selectedTitleResident!['nama'] ?? '').toString(), recordId: docId);
+                          }
+                          if (module.keyName == 'umkm') {
+                            final oldOwnerId = (initial?['pemilikWargaId'] ?? '').toString();
+                            final oldOwnerName = (initial?['pemilik'] ?? '').toString();
+                            final newOwner = selectedResidents['pemilik'];
+                            if (oldOwnerId.isNotEmpty && newOwner != null && oldOwnerId != (newOwner['wargaId'] ?? '').toString()) {
+                              await writeWargaAudit(wargaId: oldOwnerId, modul: 'umkm', aksi: 'kepemilikan berakhir', peran: 'pemilik lama', namaWarga: oldOwnerName, recordId: docId);
+                              await writeWargaAudit(wargaId: (newOwner['wargaId'] ?? '').toString(), modul: 'umkm', aksi: 'menjadi pemilik', peran: 'pemilik baru', namaWarga: (newOwner['nama'] ?? '').toString(), recordId: docId);
+                            }
+                          }
+                          for (final entry in selectedResidents.entries) {
+                            await writeWargaAudit(wargaId: (entry.value['wargaId'] ?? '').toString(), modul: module.keyName, aksi: 'diperbarui', peran: entry.key, namaWarga: (entry.value['nama'] ?? '').toString(), recordId: docId);
                           }
                         }
                         if (sheetContext.mounted) Navigator.pop(sheetContext);
@@ -2450,6 +2970,235 @@ Future<void> showRecordForm(
   for (final controller in controllers.values) {
     controller.dispose();
   }
+}
+
+class ArchivedResidentsPage extends StatelessWidget {
+  final bool isAdmin;
+  const ArchivedResidentsPage({super.key, required this.isAdmin});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isAdmin) return const Scaffold(body: Center(child: Text('Akses hanya untuk Admin/Owner.')));
+    return Scaffold(
+      appBar: AppBar(title: const Text('Arsip Warga')),
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: Db.module('sensus').snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) return Center(child: Text('Gagal memuat arsip: ${snapshot.error}'));
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          final docs = snapshot.data!.docs.where((d) => isArchivedResident(d.data())).toList();
+          if (docs.isEmpty) return const Center(child: Text('Belum ada warga yang diarsipkan.'));
+          return ListView.builder(
+            padding: const EdgeInsets.all(12), itemCount: docs.length,
+            itemBuilder: (context, i) {
+              final doc = docs[i]; final d = doc.data();
+              return Card(child: ListTile(
+                leading: const CircleAvatar(child: Icon(Icons.archive_outlined)),
+                title: Text((d['nama'] ?? 'Tanpa nama').toString()),
+                subtitle: Text('${d['statusArsip'] ?? 'Alasan tidak dicatat'} • NIK ${d['nik'] ?? '-'}\nTanggal arsip: ${d['tanggalArsip'] ?? '-'}'),
+                isThreeLine: true,
+                trailing: PopupMenuButton<String>(onSelected: (v) async {
+                  if (v == 'restore') {
+                    final yes = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+                      title: const Text('Aktifkan kembali warga?'),
+                      content: Text('Data ${(d['nama'] ?? '').toString()} akan kembali ke daftar warga aktif. Riwayat arsip tetap disimpan.'),
+                      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Aktifkan'))],
+                    ));
+                    if (yes == true) {
+                      await doc.reference.update({'statusWarga': 'Aktif', 'diaktifkanKembaliPada': FieldValue.serverTimestamp(), 'diaktifkanKembaliOleh': Db.auth.currentUser?.uid, 'updatedAt': FieldValue.serverTimestamp()});
+                      final accountUid = (d['accountUid'] ?? '').toString();
+                      if (accountUid.isNotEmpty && d['statusAkunSebelumArsip'] == 'Aktif') {
+                        await Db.user(accountUid).update({'status': 'Aktif', 'updatedAt': FieldValue.serverTimestamp()});
+                      }
+                      await writeWargaAudit(wargaId: doc.id, modul: 'sensus', aksi: 'diaktifkan kembali dari arsip', peran: 'status warga', namaWarga: (d['nama'] ?? '').toString());
+                      if (context.mounted) showMessage(context, 'Warga berhasil diaktifkan kembali.');
+                    }
+                  }
+                }, itemBuilder: (_) => const [PopupMenuItem(value: 'restore', child: Text('Aktifkan kembali'))]),
+              ));
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+Future<Map<String, int>> runLegacyWargaMigration() async {
+  final census = await Db.module('sensus').get();
+  final residents = census.docs.map((d) => <String, dynamic>{...d.data(), 'wargaId': d.id}).toList();
+  final byName = <String, List<Map<String, dynamic>>>{};
+  for (final r in residents) {
+    final key = (r['nama'] ?? '').toString().trim().toLowerCase();
+    if (key.isNotEmpty) (byName[key] ??= <Map<String, dynamic>>[]).add(r);
+  }
+  Map<String, dynamic>? unique(String name) {
+    final matches = byName[name.trim().toLowerCase()] ?? const <Map<String, dynamic>>[];
+    return matches.length == 1 ? matches.first : null;
+  }
+
+  final report = <String, int>{'diperiksa': 0, 'diperbarui': 0, 'ambiguAtauTidakCocok': 0, 'indeksNIKDibuat': 0, 'NIKGanda': 0, 'statusAktifDiisi': 0};
+  WriteBatch? censusBatch; var censusBatchCount = 0;
+  for (final doc in census.docs) {
+    final data = doc.data();
+    final patch = <String, dynamic>{};
+    if ((data['wargaId'] ?? '').toString().isEmpty) patch['wargaId'] = doc.id;
+    if ((data['statusWarga'] ?? '').toString().trim().isEmpty) { patch['statusWarga'] = 'Aktif'; report['statusAktifDiisi'] = report['statusAktifDiisi']! + 1; }
+    final kawilId = _wilayahId('KAWIL', '', (data['kawil'] ?? '').toString(), oldLabel: (data['kawil'] ?? '').toString(), oldId: (data['kawilId'] ?? '').toString());
+    final rwId = _wilayahId('RW', kawilId, (data['rw'] ?? '').toString(), oldLabel: (data['rw'] ?? '').toString(), oldId: (data['rwId'] ?? '').toString());
+    final rtId = _wilayahId('RT', rwId, (data['rt'] ?? '').toString(), oldLabel: (data['rt'] ?? '').toString(), oldId: (data['rtId'] ?? '').toString());
+    if ((data['kawilId'] ?? '').toString() != kawilId) patch['kawilId'] = kawilId;
+    if ((data['rwId'] ?? '').toString() != rwId) patch['rwId'] = rwId;
+    if ((data['rtId'] ?? '').toString() != rtId) patch['rtId'] = rtId;
+    final accountUid = (data['accountUid'] ?? '').toString();
+    if (accountUid.isNotEmpty) {
+      final userRef = Db.user(accountUid);
+      final userSnap = await userRef.get();
+      if (userSnap.exists) {
+        final userData = userSnap.data() ?? <String, dynamic>{};
+        final userPatch = <String, dynamic>{};
+        if ((userData['kawilId'] ?? '').toString().isEmpty) userPatch['kawilId'] = kawilId;
+        if ((userData['rwId'] ?? '').toString().isEmpty) userPatch['rwId'] = rwId;
+        if ((userData['rtId'] ?? '').toString().isEmpty) userPatch['rtId'] = rtId;
+        if (userPatch.isNotEmpty) await userRef.update(userPatch);
+      }
+    }
+    if (patch.isNotEmpty) {
+      censusBatch ??= Db.firestore.batch();
+      censusBatch.update(doc.reference, patch); censusBatchCount++;
+      if (censusBatchCount >= 400) { await censusBatch.commit(); censusBatch = null; censusBatchCount = 0; }
+    }
+  }
+  if (censusBatch != null && censusBatchCount > 0) await censusBatch.commit();
+  final nikGroups = <String, List<Map<String, dynamic>>>{};
+  for (final resident in residents) {
+    final nik = normalizeNik((resident['nik'] ?? '').toString());
+    if (RegExp(r'^\d{16}$').hasMatch(nik)) (nikGroups[nik] ??= <Map<String, dynamic>>[]).add(resident);
+  }
+  WriteBatch? nikBatch; var nikBatchCount = 0;
+  for (final entry in nikGroups.entries) {
+    if (entry.value.length != 1) { report['NIKGanda'] = report['NIKGanda']! + entry.value.length; continue; }
+    final resident = entry.value.single;
+    final indexRef = Db.module('sensus_nik_index').doc(entry.key);
+    final indexSnap = await indexRef.get();
+    if (indexSnap.exists && (indexSnap.data()?['wargaId'] ?? '') != (resident['wargaId'] ?? '')) {
+      report['NIKGanda'] = report['NIKGanda']! + 1;
+      continue;
+    }
+    if (!indexSnap.exists) {
+      nikBatch ??= Db.firestore.batch();
+      nikBatch.set(indexRef, {'nik': entry.key, 'wargaId': resident['wargaId'], 'createdAt': FieldValue.serverTimestamp(), 'migrated': true});
+      nikBatchCount++; report['indeksNIKDibuat'] = report['indeksNIKDibuat']! + 1;
+      if (nikBatchCount >= 400) { await nikBatch.commit(); nikBatch = null; nikBatchCount = 0; }
+    }
+  }
+  if (nikBatch != null && nikBatchCount > 0) await nikBatch.commit();
+  final configs = <String, List<String>>{
+    'umkm': ['pemilik'],
+    'sarana': ['pengelola'],
+    'kesenian': ['ketua'],
+    'kebersihan': ['petugas'],
+    'fasilitas_kesehatan': ['penanggungJawab'],
+    'organisasi': ['ketua', 'wakil', 'sekretaris', 'bendahara'],
+  };
+  for (final entry in configs.entries) {
+    final docs = await Db.module(entry.key).get();
+    WriteBatch? batch;
+    var batchCount = 0;
+    for (final doc in docs.docs) {
+      report['diperiksa'] = report['diperiksa']! + 1;
+      final data = doc.data();
+      final updates = <String, dynamic>{};
+      for (final field in entry.value) {
+        final existingId = (data['${field}WargaId'] ?? '').toString();
+        final name = (data[field] ?? '').toString().trim();
+        if (existingId.isNotEmpty || name.isEmpty) continue;
+        final resident = unique(name);
+        if (resident == null) { report['ambiguAtauTidakCocok'] = report['ambiguAtauTidakCocok']! + 1; continue; }
+        updates['${field}WargaId'] = resident['wargaId'];
+        if (entry.key == 'organisasi' && field == 'ketua') updates['ketuaUid'] = resident['accountUid'] ?? '';
+        if (entry.key == 'umkm' && field == 'pemilik') updates['pemilikUid'] = resident['accountUid'] ?? '';
+      }
+      if (entry.key == 'organisasi' && data['anggotaWarga'] == null) {
+        final names = (data['anggota'] ?? '').toString().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+        if (names.isNotEmpty) {
+          final members = <Map<String, dynamic>>[]; var allMatched = true;
+          for (final name in names) {
+            final resident = unique(name);
+            if (resident == null) { allMatched = false; report['ambiguAtauTidakCocok'] = report['ambiguAtauTidakCocok']! + 1; break; }
+            members.add({'wargaId': resident['wargaId'], 'nama': resident['nama']});
+          }
+          if (allMatched) { updates['anggotaWarga'] = members; updates['anggotaWargaIds'] = members.map((m) => m['wargaId']).toList(); }
+        }
+      }
+      if (updates.isNotEmpty) {
+        batch ??= Db.firestore.batch();
+        batch.update(doc.reference, updates); batchCount++; report['diperbarui'] = report['diperbarui']! + 1;
+        if (batchCount >= 400) { await batch.commit(); batch = null; batchCount = 0; }
+      }
+    }
+    if (batch != null && batchCount > 0) await batch.commit();
+  }
+
+  // Perangkat menyimpan nama pemegang jabatan pada judul/nama.
+  final perangkatDocs = await Db.module('perangkat').get();
+  WriteBatch? perangkatBatch; var perangkatCount = 0;
+  for (final doc in perangkatDocs.docs) {
+    report['diperiksa'] = report['diperiksa']! + 1;
+    final d = doc.data();
+    if ((d['pemegangJabatanWargaId'] ?? d['wargaId'] ?? '').toString().isNotEmpty) continue;
+    final name = (d['nama'] ?? d['judul'] ?? '').toString().trim();
+    if (name.isEmpty) continue;
+    final resident = unique(name);
+    if (resident == null) { report['ambiguAtauTidakCocok'] = report['ambiguAtauTidakCocok']! + 1; continue; }
+    perangkatBatch ??= Db.firestore.batch();
+    perangkatBatch.update(doc.reference, {'wargaId': resident['wargaId'], 'pemegangJabatanWargaId': resident['wargaId']});
+    perangkatCount++; report['diperbarui'] = report['diperbarui']! + 1;
+    if (perangkatCount >= 400) { await perangkatBatch.commit(); perangkatBatch = null; perangkatCount = 0; }
+  }
+  if (perangkatBatch != null && perangkatCount > 0) await perangkatBatch.commit();
+
+  await Db.module('riwayat_perubahan').add({
+    'modul': 'migrasi_satu_data', 'aksi': 'migrasi data lama', 'ringkasan': report,
+    'uid': Db.auth.currentUser?.uid ?? '', 'waktu': FieldValue.serverTimestamp(),
+  });
+  return report;
+}
+
+class MigrasiSatuDataPage extends StatefulWidget {
+  final bool isAdmin;
+  const MigrasiSatuDataPage({super.key, required this.isAdmin});
+  @override State<MigrasiSatuDataPage> createState() => _MigrasiSatuDataPageState();
+}
+
+class _MigrasiSatuDataPageState extends State<MigrasiSatuDataPage> {
+  bool busy = false;
+  Map<String, int>? report;
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Migrasi Satu Data Warga')),
+    body: ListView(padding: const EdgeInsets.all(16), children: [
+      const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Migrasi ini menghubungkan data modul lama ke Data Sensus berdasarkan nama yang cocok tepat dan hanya jika hasilnya unik. Jika ada dua warga dengan nama sama atau tidak ditemukan, data dilewati agar tidak salah menghubungkan. Data lama tidak dihapus.'))),
+      const SizedBox(height: 12),
+      FilledButton.icon(onPressed: !widget.isAdmin || busy ? null : () async {
+        final yes = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+          title: const Text('Jalankan migrasi?'),
+          content: const Text('Sistem akan menambahkan wargaId ke data UMKM, perangkat, sarana, kesenian, kebersihan, fasilitas kesehatan, dan organisasi yang dapat dicocokkan secara unik. Data yang ambigu tidak diubah.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Mulai migrasi'))],
+        ));
+        if (yes != true) return;
+        setState(() { busy = true; report = null; });
+        try { final result = await runLegacyWargaMigration(); if (mounted) setState(() => report = result); }
+        catch (e) { if (mounted) showMessage(context, 'Migrasi gagal: $e'); }
+        finally { if (mounted) setState(() => busy = false); }
+      }, icon: busy ? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2)) : const Icon(Icons.sync), label: Text(busy ? 'Sedang memigrasikan...' : 'Jalankan migrasi data lama')),
+      if (report != null) Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Hasil migrasi', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+        const SizedBox(height: 8), Text('Data diperiksa: ${report!['diperiksa']}'), Text('Dokumen diperbarui: ${report!['diperbarui']}'), Text('Status Aktif dilengkapi: ${report!['statusAktifDiisi']}'), Text('Indeks NIK dibuat: ${report!['indeksNIKDibuat']}'), Text('NIK ganda yang perlu diperiksa: ${report!['NIKGanda']}'), Text('Nama ambigu / tidak cocok: ${report!['ambiguAtauTidakCocok']}'),
+        const SizedBox(height: 8), const Text('Data ambigu perlu dibuka satu per satu dari modul terkait, lalu pilih warga yang benar dari Sensus.'),
+      ]))),
+    ]),
+  );
 }
 
 class ProfilePage extends StatefulWidget {
@@ -2564,7 +3313,7 @@ class InformasiDiriPage extends StatefulWidget {
   @override State<InformasiDiriPage> createState()=>_InformasiDiriPageState();
 }
 class _InformasiDiriPageState extends State<InformasiDiriPage>{
-  static const locked={'nama','nik','noKK','role','roles','wargaId','accountUid','createdAt','createdBy','updatedAt','updatedBy','akunStatus'};
+  static const locked={'nama','nik','noKK','role','roles','wargaId','accountUid','createdAt','createdBy','updatedAt','updatedBy','akunStatus','kawil','rw','rt','kawilId','rwId','rtId','statusWarga','statusArsip','tanggalArsip','alamatTujuan','statusAkunSebelumArsip'};
   Future<void> edit(Map<String, dynamic> data, String wargaId) async {
     final editable = data.entries
         .where((e) => !locked.contains(e.key) && e.value is String)
@@ -2647,6 +3396,17 @@ class _InformasiDiriPageState extends State<InformasiDiriPage>{
                                 await Db.module('sensus')
                                     .doc(wargaId)
                                     .update(changes);
+                                final selfProfileUpdates = <String, dynamic>{'updatedAt': FieldValue.serverTimestamp()};
+                                if (changes.containsKey('telepon')) selfProfileUpdates['telepon'] = changes['telepon'];
+                                if (changes.containsKey('alamat')) selfProfileUpdates['alamat'] = changes['alamat'];
+                                await Db.user(Db.auth.currentUser!.uid).update(selfProfileUpdates);
+                                await writeWargaAudit(
+                                  wargaId: wargaId,
+                                  modul: 'informasi_diri',
+                                  aksi: 'memperbarui identitas',
+                                  peran: 'data pribadi',
+                                  namaWarga: (data['nama'] ?? '').toString(),
+                                );
                                 if (ctx.mounted) {
                                   Navigator.pop(ctx);
                                 }
@@ -2968,6 +3728,15 @@ Future<void> openGoogleMaps(BuildContext context, String rawLocation) async {
   }
 }
 
+String _formatHistoryDate(dynamic value) {
+  if (value == null) return '—';
+  DateTime? date;
+  if (value is Timestamp) date = value.toDate();
+  if (value is DateTime) date = value;
+  if (date != null) return '${date.day.toString().padLeft(2,'0')}-${date.month.toString().padLeft(2,'0')}-${date.year}';
+  return value.toString();
+}
+
 void showRecordDetail(BuildContext context, String title, Map<String, dynamic> data) {
   final excluded = {'createdAt', 'updatedAt', 'createdBy', 'updatedBy'};
   final phone = (data['telepon'] ?? data['whatsapp'] ?? '').toString().trim();
@@ -3036,9 +3805,21 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
                 subtitle: Text(maps.isNotEmpty ? maps : address, maxLines: 2, overflow: TextOverflow.ellipsis),
                 onTap: () => openGoogleMaps(sheetContext, maps.isNotEmpty ? maps : address),
               ),
+            if (data['riwayatPemilik'] is List && (data['riwayatPemilik'] as List).isNotEmpty) ...[
+              const Divider(),
+              const Text('Riwayat Kepemilikan UMKM', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 8),
+              ...(data['riwayatPemilik'] as List).whereType<Map>().map((item) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.history),
+                title: Text((item['nama'] ?? 'Pemilik').toString()),
+                subtitle: Text('${item['status'] ?? ''} • Mulai: ${_formatHistoryDate(item['mulaiPada'])} • Selesai: ${_formatHistoryDate(item['selesaiPada'])}'),
+              )),
+            ],
             const Divider(),
             ...data.entries.where((e) => !excluded.contains(e.key) &&
-                !{'telepon', 'whatsapp', 'lokasiMaps', 'googleMaps', 'fotoUrl', 'foto', 'imageUrl'}.contains(e.key)).map((e) => Padding(
+                !{'telepon', 'whatsapp', 'lokasiMaps', 'googleMaps', 'fotoUrl', 'foto', 'imageUrl', 'riwayatPemilik', 'wargaId', 'accountUid', 'roles', 'role', 'ketuaUid', 'anggotaWarga', 'anggotaWargaIds', 'kawilId', 'rwId', 'rtId', 'pemilikNamaSnapshot', 'pemilikMulaiPada', 'statusAkunSebelumArsip'}.contains(e.key) &&
+                !e.key.endsWith('WargaId') && !e.key.endsWith('Nik') && !e.key.endsWith('Uid')).map((e) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(e.key.replaceAll('_', ' ').toUpperCase(), style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
