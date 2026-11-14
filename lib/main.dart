@@ -421,6 +421,10 @@ class PhotoService {
     });
   }
 
+  static Future<Map<String, dynamic>> restoreOwnerNikAccount() async {
+    return _request({'action': 'restoreOwnerNikAccount'});
+  }
+
   static Future<void> deleteIfOwned(String? url) async {
     if (url == null || url.trim().isEmpty) return;
     final uri = Uri.tryParse(url);
@@ -3945,7 +3949,8 @@ class UserManagementPage extends StatelessWidget {
             final meRoles = (meData['roles'] is List)
                 ? (meData['roles'] as List).map((e) => e.toString().toLowerCase()).toSet()
                 : <String>{(meData['role'] ?? '').toString().toLowerCase()};
-            final isOwner = meRoles.contains('owner');
+            final isOwner = meRoles.contains('owner') ||
+                (meData['role'] ?? '').toString().toLowerCase() == 'owner';
             return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: Db.firestore.collection('users').orderBy('nama').snapshots(),
               builder: (context, snapshot) {
@@ -3953,7 +3958,40 @@ class UserManagementPage extends StatelessWidget {
                 if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
                 return ListView(
                   padding: const EdgeInsets.all(12),
-                  children: snapshot.data!.docs.map((doc) {
+                  children: [
+                    if (isOwner)
+                      Card(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        child: ListTile(
+                          leading: const Icon(Icons.replay_circle_filled_outlined),
+                          title: const Text('Pulihkan login Owner dengan NIK'),
+                          subtitle: const Text('Membuat ulang akun NIK dari data Sensus milik Owner yang sedang login. Data Sensus tidak dibuat ulang.'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () async {
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('Pulihkan akun NIK Owner?'),
+                                content: const Text('Sistem akan membuat akun login NIK berdasarkan data Sensus Owner yang sedang login. Password awal adalah tanggal lahir (DDMMYYYY) dan wajib diganti setelah login.'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+                                  FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Pulihkan akun')),
+                                ],
+                              ),
+                            );
+                            if (confirmed != true || !context.mounted) return;
+                            try {
+                              final result = await PhotoService.restoreOwnerNikAccount();
+                              if (context.mounted) {
+                                showMessage(context, (result['message'] ?? 'Akun NIK Owner berhasil dipulihkan.').toString());
+                              }
+                            } catch (e) {
+                              if (context.mounted) showMessage(context, 'Pemulihan akun gagal: $e');
+                            }
+                          },
+                        ),
+                      ),
+                    ...snapshot.data!.docs.map((doc) {
                     final d = doc.data();
                     final role = (d['role'] ?? 'warga').toString();
                     final roleList = (d['roles'] is List)
@@ -3991,6 +4029,7 @@ class UserManagementPage extends StatelessWidget {
                       ),
                     );
                   }).toList(),
+                  ],
                 );
               },
             );
