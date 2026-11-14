@@ -5,7 +5,7 @@ import 'dart:ui' show FontFeature;
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' as xls;
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -3200,7 +3200,7 @@ class _MigrasiSatuDataPageState extends State<MigrasiSatuDataPage> {
     'wargaId':'wargaId','NIK':'nik','No_KK':'noKK','Nama_Lengkap':'nama','Nama_Panggilan':'namaPanggilan','Jenis_Kelamin':'jenisKelamin','Tempat_Lahir':'tempatLahir','Tanggal_Lahir':'tanggalLahir','Agama':'agama','Status_Perkawinan':'statusPerkawinan','Hubungan_Dalam_KK':'hubunganKeluarga','Pendidikan':'pendidikan','Pekerjaan':'pekerjaan','No_HP':'telepon','Kawil':'kawil','RW':'rw','RT':'rt','Alamat':'alamat','Status_Warga':'statusWarga','Keterangan':'keterangan'
   };
 
-  String _cellText(Data? cell) => cell?.value?.toString().trim() ?? '';
+  String _cellText(xls.Data? cell) => cell?.value?.toString().trim() ?? '';
   String _norm(String value) => value.replaceAll(RegExp(r'\D'), '');
 
   Future<void> _pickAndCheckExcel() async {
@@ -3209,7 +3209,7 @@ class _MigrasiSatuDataPageState extends State<MigrasiSatuDataPage> {
       final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['xlsx'], withData: true);
       if (picked == null || picked.files.single.bytes == null) return;
       setState(() { _busy = true; _rows.clear(); _fileName = picked.files.single.name; });
-      final excel = Excel.decodeBytes(picked.files.single.bytes!);
+      final excel = xls.Excel.decodeBytes(picked.files.single.bytes!);
       if (excel.tables.isEmpty) throw Exception('File Excel tidak memiliki sheet.');
       final sheet = excel.tables['DATA_WARGA'] ?? excel.tables.values.first;
       if (sheet.rows.isEmpty) throw Exception('Sheet DATA_WARGA kosong.');
@@ -3240,7 +3240,7 @@ class _MigrasiSatuDataPageState extends State<MigrasiSatuDataPage> {
         if (nik.isEmpty || nik.length != 16 || name.isEmpty) {
           status='TIDAK VALID'; message=nik.isEmpty ? 'NIK kosong; tidak dapat dicocokkan otomatis.' : (nik.length != 16 ? 'NIK harus 16 digit.' : 'Nama lengkap wajib diisi.');
         } else if (seenNik.containsKey(nik)) {
-          status='DATA GANDA'; message='NIK juga muncul pada baris ${seenNik[nik]}. Periksa data Excel.';
+          status='DATA GANDA'; message='NIK juga muncul pada baris ${seenNik[nik]}. Periksa data xls.Excel.';
         } else {
           seenNik[nik]=i+1;
           final explicitId=(rowData['wargaId'] ?? '').toString();
@@ -3278,9 +3278,9 @@ class _MigrasiSatuDataPageState extends State<MigrasiSatuDataPage> {
     if (!widget.isAdmin || _busy) return;
     setState(()=>_busy=true);
     try {
-      final excel=Excel.createExcel();
+      final excel=xls.Excel.createExcel();
       final sheet=excel['DATA_WARGA'];
-      sheet.appendRow(_headers.map((e)=>TextCellValue(e)).toList());
+      sheet.appendRow(_headers.map((e)=>xls.TextCellValue(e)).toList());
       if (!templateOnly && !errorsOnly) {
         final snap=await Db.module('sensus').get();
         for (final doc in snap.docs) {
@@ -3289,20 +3289,20 @@ class _MigrasiSatuDataPageState extends State<MigrasiSatuDataPage> {
           if(rw.isNotEmpty && (d['rw']??'').toString()!=rw) continue;
           if(rt.isNotEmpty && (d['rt']??'').toString()!=rt) continue;
           final values=<String,dynamic>{'wargaId':doc.id,...d};
-          sheet.appendRow(_headers.map((h)=>TextCellValue((values[_map[h]] ?? '').toString())).toList());
+          sheet.appendRow(_headers.map((h)=>xls.TextCellValue((values[_map[h]] ?? '').toString())).toList());
         }
       }
       if (errorsOnly) {
         final report=excel['HASIL_PEMERIKSAAN'];
-        report.appendRow(['Baris Excel','Nama','NIK','Status','Keterangan'].map((e)=>TextCellValue(e)).toList());
+        report.appendRow(['Baris Excel','Nama','NIK','Status','Keterangan'].map((e)=>xls.TextCellValue(e)).toList());
         for(final row in _rows.where((e)=>!e.ready)) {
-          report.appendRow([TextCellValue(row.rowNumber.toString()),TextCellValue((row.data['nama']??'').toString()),TextCellValue((row.data['nik']??'').toString()),TextCellValue(row.status),TextCellValue(row.message)]);
+          report.appendRow([xls.TextCellValue(row.rowNumber.toString()),xls.TextCellValue((row.data['nama']??'').toString()),xls.TextCellValue((row.data['nik']??'').toString()),xls.TextCellValue(row.status),xls.TextCellValue(row.message)]);
         }
       }
       final ref=excel['REFERENSI'];
-      ref.appendRow([TextCellValue('Petunjuk'),TextCellValue('Isi NIK sebagai teks 16 digit. Jangan mengubah wargaId pada data hasil ekspor.')]);
+      ref.appendRow([xls.TextCellValue('Petunjuk'),xls.TextCellValue('Isi NIK sebagai teks 16 digit. Jangan mengubah wargaId pada data hasil ekspor.')]);
       final bytes=excel.encode();
-      if (bytes==null) throw Exception('Gagal membuat file Excel.');
+      if (bytes==null) throw Exception('Gagal membuat file xls.Excel.');
       final path=await FilePicker.platform.saveFile(fileName:templateOnly?'Template_Sensus_Warga.xlsx':(errorsOnly?'Laporan_Pemeriksaan_Sensus.xlsx':'Ekspor_Sensus_Warga.xlsx'),bytes:Uint8List.fromList(bytes));
       if (path!=null && mounted) showMessage(context,'File Excel berhasil disiapkan.');
     } catch(e) { if(mounted) showMessage(context,'Gagal ekspor Excel: $e'); }
@@ -3349,7 +3349,7 @@ class _MigrasiSatuDataPageState extends State<MigrasiSatuDataPage> {
     final newNik=_norm(result['nik']??'');final newName=(result['nama']??'').trim();
     if(newNik.length!=16||newName.isEmpty){setState(() { row.status='TIDAK VALID'; row.message='NIK harus 16 digit dan nama wajib diisi.'; row.matchedId=null; });return;}
     final duplicate=_rows.any((r)=>!identical(r,row)&&_norm((r.data['nik']??'').toString())==newNik);
-    if(duplicate){setState(() { row.data['nik']=result['nik']; row.data['nama']=newName; row.status='DATA GANDA'; row.message='NIK sama dengan baris lain dalam file Excel.'; row.matchedId=null; });return;}
+    if(duplicate){setState(() { row.data['nik']=result['nik']; row.data['nama']=newName; row.status='DATA GANDA'; row.message='NIK sama dengan baris lain dalam file xls.Excel.'; row.matchedId=null; });return;}
     final chosen=result['selected']??'';
     final matched=chosen.isNotEmpty?existing.docs.where((d)=>d.id==chosen).toList():existing.docs.where((d)=>_norm((d.data()['nik']??'').toString())==newNik).toList();
     setState(() {
