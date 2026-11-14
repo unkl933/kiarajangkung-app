@@ -1114,13 +1114,23 @@ Future<void> _openPhone(BuildContext context, String phone) async {
 }
 
 Future<void> _openWhatsApp(BuildContext context, String phone) async {
+  // Samakan dengan handler WhatsApp pada modul: jangan memakai canLaunchUrl,
+  // karena Android dapat menolak pemeriksaan tersebut walaupun URL bisa dibuka.
   final number = _whatsappNumber(phone);
-  if (number.isEmpty) return;
+  if (number.isEmpty) {
+    if (context.mounted) showMessage(context, 'Nomor WhatsApp belum diisi.');
+    return;
+  }
   final uri = Uri.parse('https://wa.me/$number');
-  if (await canLaunchUrl(uri)) {
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  } else if (context.mounted) {
-    showMessage(context, 'Tidak dapat membuka WhatsApp.');
+  try {
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && context.mounted) {
+      showMessage(context, 'Tidak dapat membuka WhatsApp. Pastikan WhatsApp atau browser tersedia.');
+    }
+  } catch (e) {
+    if (context.mounted) {
+      showMessage(context, 'Gagal membuka WhatsApp. Periksa aplikasi WhatsApp atau browser.');
+    }
   }
 }
 
