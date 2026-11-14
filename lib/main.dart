@@ -26,33 +26,66 @@ class KampungDigitalApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const green = Color(0xFF167C55);
+    const accent = Color(0xFFC94B4B);
+    const ink = Color(0xFF252932);
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Kampung Digital Kiarajangkung',
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: green),
-        scaffoldBackgroundColor: const Color(0xFFF5F8F6),
+        colorScheme: ColorScheme.fromSeed(seedColor: accent).copyWith(
+          primary: accent,
+          secondary: const Color(0xFF477C9D),
+          surface: Colors.white,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF7F7F8),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF5F8F6),
+          backgroundColor: Colors.white,
+          foregroundColor: ink,
           surfaceTintColor: Colors.transparent,
+          elevation: 0,
           centerTitle: false,
+          titleTextStyle: TextStyle(color: ink, fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          backgroundColor: Colors.white,
+          indicatorColor: const Color(0xFFFCEAEA),
+          elevation: 8,
+          labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
+            fontSize: 11,
+            fontWeight: states.contains(WidgetState.selected) ? FontWeight.w800 : FontWeight.w500,
+            color: states.contains(WidgetState.selected) ? accent : const Color(0xFF777D86),
+          )),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: Colors.white,
+          hintStyle: const TextStyle(color: Color(0xFF9A9EA5), fontSize: 13),
+          prefixIconColor: const Color(0xFF858B94),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: Color(0xFFE9EAED)),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: Color(0xFFE9EAED)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(16),
+            borderSide: const BorderSide(color: accent, width: 1.4),
           ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
         ),
         cardTheme: CardThemeData(
           color: Colors.white,
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          margin: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: Color(0xFFEDEFF1)),
+          ),
         ),
+        dividerTheme: const DividerThemeData(color: Color(0xFFEDEEF1), thickness: 1),
       ),
       home: const AuthGate(),
     );
@@ -828,7 +861,16 @@ class _HomePageState extends State<HomePage> {
     ];
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Kampung Kiarajangkung'),
+        titleSpacing: 18,
+        title: Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 34, height: 34,
+            decoration: BoxDecoration(color: const Color(0xFFFCEAEA), borderRadius: BorderRadius.circular(11)),
+            child: const Icon(Icons.home_work_rounded, color: Color(0xFFC94B4B), size: 20),
+          ),
+          const SizedBox(width: 10),
+          const Flexible(child: Text('Kampung Kiarajangkung', maxLines: 1, overflow: TextOverflow.ellipsis)),
+        ]),
         actions: [
           if (isAdmin)
             IconButton(
@@ -902,40 +944,38 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
       children: [
         Container(
-          padding: const EdgeInsets.all(18),
+          padding: const EdgeInsets.all(17),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
-              colors: [Color(0xFF105B3E), Color(0xFF239B70)]),
-            borderRadius: BorderRadius.circular(26),
-            boxShadow: [BoxShadow(color: const Color(0xFF167C55).withOpacity(.18), blurRadius: 18, offset: const Offset(0, 8))],
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(21),
+            border: Border.all(color: const Color(0xFFEDEFF1)),
+            boxShadow: [BoxShadow(color: const Color(0xFF252932).withOpacity(.035), blurRadius: 16, offset: const Offset(0, 5))],
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+            Row(children: [
+              Container(width: 46, height: 46,
+                decoration: BoxDecoration(color: const Color(0xFFFCEAEA), borderRadius: BorderRadius.circular(15)),
+                child: const Icon(Icons.waving_hand_rounded, color: Color(0xFFC94B4B), size: 24)),
+              const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('👋 Wilujeng Sumping,', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 5),
-                Text(name, maxLines: 2, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                const Text('Wilujeng Sumping!', style: TextStyle(fontSize: 12, color: Color(0xFF858B94), fontWeight: FontWeight.w600)),
                 const SizedBox(height: 3),
-                const Text('Selamat datang di kampung kami', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Color(0xFF252932), fontSize: 18, fontWeight: FontWeight.w800)),
               ])),
-              const SizedBox(width: 8),
-              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                Text(dayNames[now.weekday-1], style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                Text(dateText, textAlign: TextAlign.right, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 3),
-                Text(timeText, style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
-                const Text('WIB', style: TextStyle(color: Colors.white70, fontSize: 10)),
-              ]),
+              Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(color: const Color(0xFFF7F7F8), borderRadius: BorderRadius.circular(12)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Text(dayNames[now.weekday-1], style: const TextStyle(fontSize: 10, color: Color(0xFF858B94))),
+                  Text(dateText, style: const TextStyle(fontSize: 10, color: Color(0xFF252932), fontWeight: FontWeight.w700)),
+                  Text('$timeText WIB', style: const TextStyle(fontSize: 12, color: Color(0xFFC94B4B), fontWeight: FontWeight.w800)),
+                ])),
             ]),
             if (jabatan.isNotEmpty || roles.contains('pemilik_umkm')) ...[
-              const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Divider(color: Colors.white30, height: 1)),
-              if (jabatan.isNotEmpty) ...[
-                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Icon(Icons.badge_outlined, color: Colors.white, size: 18), const SizedBox(width: 9),
-                  Expanded(child: Text(jabatan.join(' • '), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12))),
-                ]),
-              ],
+              const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Divider(height: 1)),
+              if (jabatan.isNotEmpty)
+                Row(children: [const Icon(Icons.badge_outlined, color: Color(0xFFC94B4B), size: 17), const SizedBox(width: 8),
+                  Expanded(child: Text(jabatan.join(' • '), style: const TextStyle(color: Color(0xFF555B65), fontWeight: FontWeight.w600, fontSize: 11)))]),
               if (roles.contains('pemilik_umkm')) ...[
                 if (jabatan.isNotEmpty) const SizedBox(height: 8),
                 StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
@@ -943,15 +983,33 @@ class _HomePageState extends State<HomePage> {
                   builder: (context, snap) {
                     final usaha = snap.data?.docs.map((d) => (d.data()['nama'] ?? d.data()['nama_usaha'] ?? d.data()['judul'] ?? 'UMKM warga').toString()).toList() ?? <String>[];
                     final label = usaha.isNotEmpty ? usaha.join(', ') : (widget.profile['namaUsaha'] ?? 'Pemilik UMKM').toString();
-                    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Icon(Icons.storefront_outlined, color: Colors.white, size: 18), const SizedBox(width: 9),
-                      Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12))),
-                    ]);
+                    return Row(children: [const Icon(Icons.storefront_outlined, color: Color(0xFFC94B4B), size: 17), const SizedBox(width: 8),
+                      Expanded(child: Text(label, style: const TextStyle(color: Color(0xFF555B65), fontWeight: FontWeight.w600, fontSize: 11)))]);
                   },
                 ),
               ],
             ],
           ]),
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          textInputAction: TextInputAction.search,
+          onSubmitted: (value) {
+            final q = value.trim().toLowerCase();
+            if (q.isEmpty) return;
+            final matches = modules.where((m) => m.title.toLowerCase().contains(q) || m.subtitle.toLowerCase().contains(q)).toList();
+            if (matches.isNotEmpty) {
+              openModule(matches.first.keyName);
+            } else {
+              showMessage(context, 'Menu atau layanan tidak ditemukan.');
+            }
+          },
+          decoration: InputDecoration(
+            hintText: 'Cari layanan, informasi, atau menu...',
+            prefixIcon: const Icon(Icons.search_rounded),
+            suffixIcon: Container(margin: const EdgeInsets.all(6), decoration: BoxDecoration(color: const Color(0xFFC94B4B), borderRadius: BorderRadius.circular(11)),
+              child: const Icon(Icons.tune_rounded, color: Colors.white, size: 19)),
+          ),
         ),
         const SizedBox(height: 12),
         const DashboardAnnouncements(),
@@ -986,12 +1044,13 @@ class _HomePageState extends State<HomePage> {
         _DashboardSectionTitle(title: 'Jelajahi Kampung', action: 'Lihat semua', onAction: () => setState(() => tab = 1)),
         const SizedBox(height: 8),
         ...modules.where((m) => !['sensus'].contains(m.keyName)).take(9).map((m) => Card(
-          margin: const EdgeInsets.only(bottom: 7),
+          margin: const EdgeInsets.only(bottom: 9),
           child: ListTile(
-            leading: CircleAvatar(backgroundColor: Theme.of(context).colorScheme.primaryContainer, child: Icon(m.icon)),
-            title: Text(m.title, style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text(m.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis),
-            trailing: const Icon(Icons.chevron_right), onTap: () => openModule(m.keyName),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+            leading: Container(width: 42, height: 42, decoration: BoxDecoration(color: const Color(0xFFFCEAEA), borderRadius: BorderRadius.circular(13)), child: Icon(m.icon, color: const Color(0xFFC94B4B), size: 21)),
+            title: Text(m.title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+            subtitle: Text(m.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+            trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 15, color: Color(0xFF9A9EA5)), onTap: () => openModule(m.keyName),
           ),
         )),
       ],
@@ -1011,7 +1070,7 @@ class _DashboardSectionTitle extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     children: [
       Expanded(child: Text(title,
-        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold))),
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800, color: const Color(0xFF252932)))),
       if (action != null)
         TextButton(onPressed: onAction, child: Text(action!)),
     ],
@@ -1029,15 +1088,15 @@ class _DashboardService extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Material(
     color: Colors.white,
-    borderRadius: BorderRadius.circular(17),
+    borderRadius: BorderRadius.circular(18),
     child: InkWell(
-      borderRadius: BorderRadius.circular(17),
+      borderRadius: BorderRadius.circular(18),
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(17),
-          border: Border.all(color: const Color(0xFFE8EFEA)),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: const Color(0xFFEDEFF1)),
         ),
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
           Container(width: 43, height: 43,
