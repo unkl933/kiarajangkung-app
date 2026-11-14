@@ -421,6 +421,19 @@ class PhotoService {
     });
   }
 
+  static Future<Map<String, dynamic>> assignWilayahRole({
+    required String wargaId,
+    required String level,
+    required String wilayahId,
+  }) async {
+    return _request({
+      'action': 'assignWilayahRole',
+      'wargaId': wargaId,
+      'level': level,
+      'wilayahId': wilayahId,
+    });
+  }
+
   static Future<Map<String, dynamic>> restoreOwnerNikAccount() async {
     return _request({'action': 'restoreOwnerNikAccount'});
   }
@@ -3933,6 +3946,15 @@ class AdminPage extends StatelessWidget {
                 )),
             Card(
               child: ListTile(
+                leading: const Icon(Icons.account_tree_outlined),
+                title: const Text('Manajemen Wilayah'),
+                subtitle: const Text('Kelola Kawil, RW, RT dan tetapkan ketua dari Data Sensus'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const WilayahManagementPage())),
+              ),
+            ),
+            Card(
+              child: ListTile(
                 leading: const Icon(Icons.manage_accounts_outlined),
                 title: const Text('Manajemen akun warga'),
                 subtitle: const Text('Lihat akun dan tetapkan admin'),
@@ -3943,6 +3965,184 @@ class AdminPage extends StatelessWidget {
           ],
         ),
       );
+}
+
+class WilayahManagementPage extends StatelessWidget {
+  const WilayahManagementPage({super.key});
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+    future: Db.user(Db.auth.currentUser!.uid).get(),
+    builder: (context, snapshot) {
+      if (!snapshot.hasData) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      final profile = snapshot.data!.data() ?? <String, dynamic>{};
+      final roles = (profile['roles'] is List) ? (profile['roles'] as List).map((e) => e.toString().toLowerCase()).toSet() : <String>{};
+      final isOwner = (profile['role'] ?? '').toString().toLowerCase() == 'owner' || roles.contains('owner');
+      return DefaultTabController(
+        length: 3,
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Manajemen Wilayah'),
+            bottom: const TabBar(tabs: [
+              Tab(text: 'Kawil'), Tab(text: 'RW'), Tab(text: 'RT'),
+            ]),
+          ),
+          body: Column(children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+              child: Text('Gunakan nama Kawil, RW, dan RT yang sama dengan Data Sensus lama agar ID wilayah tetap terhubung. Penetapan ketua hanya dapat dilakukan Owner.', style: Theme.of(context).textTheme.bodySmall),
+            ),
+            Expanded(child: TabBarView(children: [
+              _WilayahLevelList(level: 'kawil', allowAssign: isOwner),
+              _WilayahLevelList(level: 'rw', allowAssign: isOwner),
+              _WilayahLevelList(level: 'rt', allowAssign: isOwner),
+            ])),
+          ]),
+        ),
+      );
+    },
+  );
+}
+
+class _WilayahLevelList extends StatelessWidget {
+  final String level;
+  final bool allowAssign;
+  const _WilayahLevelList({required this.level, required this.allowAssign});
+
+  String get collection => level == 'kawil' ? 'wilayah_kawil' : level == 'rw' ? 'wilayah_rw' : 'wilayah_rt';
+  String get title => level == 'kawil' ? 'Kawil' : level.toUpperCase();
+  String get parentCollection => level == 'rw' ? 'wilayah_kawil' : 'wilayah_rw';
+  String get parentField => level == 'rw' ? 'kawilId' : 'rwId';
+
+  Future<void> _edit(BuildContext context, {String? id, Map<String, dynamic>? initial}) async {
+    final name = TextEditingController(text: (initial?['nama'] ?? '').toString());
+    String parentId = (initial?[parentField] ?? '').toString();
+    String parentName = (initial?[level == 'rw' ? 'kawilNama' : 'rwNama'] ?? '').toString();
+    QuerySnapshot<Map<String, dynamic>>? parents;
+    if (level != 'kawil') {
+      parents = await Db.module(parentCollection).get();
+      if (parents!.docs.isEmpty) {
+        if (context.mounted) showMessage(context, level == 'rw' ? 'Buat data Kawil terlebih dahulu.' : 'Buat data RW terlebih dahulu.');
+        name.dispose();
+        return;
+      }
+    }
+    if (!context.mounted) { name.dispose(); return; }
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setDialog) => AlertDialog(
+        title: Text('${id == null ? 'Tambah' : 'Edit'} $title'),
+        content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: name, autofocus: true, decoration: InputDecoration(labelText: level == 'kawil' ? 'Nama Kawil / Dusun' : 'Nama ${title} (contoh: 001)')),
+          if (parents != null) ...[
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: parents!.docs.any((d) => d.id == parentId) ? parentId : null,
+              decoration: InputDecoration(labelText: level == 'rw' ? 'Di bawah Kawil' : 'Di bawah RW'),
+              items: parents!.docs.map((d) => DropdownMenuItem(value: d.id, child: Text((d.data()['nama'] ?? d.id).toString()))).toList(),
+              onChanged: (v) {
+                parentId = v ?? '';
+                final selected = parents!.docs.where((d) => d.id == parentId).toList();
+                parentName = selected.isEmpty ? '' : (selected.first.data()['nama'] ?? '').toString();
+                setDialog(() {});
+              },
+            ),
+          ],
+        ])),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          FilledButton(onPressed: () {
+            if (name.text.trim().isEmpty || (level != 'kawil' && parentId.isEmpty)) return;
+            Navigator.pop(ctx, {'nama': name.text.trim(), if (level != 'kawil') parentField: parentId, if (level != 'kawil') (level == 'rw' ? 'kawilNama' : 'rwNama'): parentName});
+          }, child: const Text('Simpan')),
+        ],
+      )),
+    );
+    name.dispose();
+    if (result == null) return;
+    if (level == 'rt' && parents != null) {
+      final parentRw = parents!.docs.where((d) => d.id == (result['rwId'] ?? '')).toList();
+      if (parentRw.isNotEmpty) {
+        result['kawilId'] = parentRw.first.data()['kawilId'] ?? '';
+        result['kawilNama'] = parentRw.first.data()['kawilNama'] ?? '';
+      }
+    }
+    try {
+      final now = FieldValue.serverTimestamp();
+      if (id == null) {
+        // ID deterministik mengikuti helper wilayah yang sudah dipakai Data Sensus.
+        // Dengan nama dan induk yang sama, dokumen baru langsung tersambung ke warga lama.
+        final generatedId = level == 'kawil'
+            ? _wilayahId('KAWIL', '', (result['nama'] ?? '').toString())
+            : level == 'rw'
+                ? _wilayahId('RW', (result['kawilId'] ?? '').toString(), (result['nama'] ?? '').toString())
+                : _wilayahId('RT', (result['rwId'] ?? '').toString(), (result['nama'] ?? '').toString());
+        final target = Db.module(collection).doc(generatedId);
+        final exists = await target.get();
+        if (exists.exists) throw Exception('$title dengan nama tersebut sudah ada. Pilih Edit pada data yang tersedia.');
+        await target.set({...result, 'aktif': true, 'createdAt': now, 'createdBy': Db.auth.currentUser?.uid, 'updatedAt': now});
+      } else {
+        await Db.module(collection).doc(id).update({...result, 'updatedAt': now, 'updatedBy': Db.auth.currentUser?.uid});
+      }
+      if (context.mounted) showMessage(context, '$title berhasil disimpan.');
+    } catch (e) { if (context.mounted) showMessage(context, 'Gagal menyimpan $title: $e'); }
+  }
+
+  Future<void> _assign(BuildContext context, String id, Map<String, dynamic> data) async {
+    try {
+      final residents = await loadActiveResidents();
+      final selected = await showResidentPicker(context, residents, title: 'Pilih Ketua $title');
+      if (selected == null || !context.mounted) return;
+      final wargaId = (selected['wargaId'] ?? '').toString();
+      if ((selected['accountUid'] ?? '').toString().isEmpty) {
+        showMessage(context, 'Warga ini belum memiliki akun aplikasi. Buat/tautkan akun terlebih dahulu.');
+        return;
+      }
+      await PhotoService.assignWilayahRole(wargaId: wargaId, level: level, wilayahId: id);
+      if (context.mounted) showMessage(context, '${selected['nama']} berhasil ditetapkan sebagai ${level == 'kawil' ? 'Perangkat Kawil' : 'Ketua $title'}.');
+    } catch (e) { if (context.mounted) showMessage(context, 'Gagal menetapkan petugas: $e'); }
+  }
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    stream: Db.module(collection).orderBy('nama').snapshots(),
+    builder: (context, snapshot) {
+      if (snapshot.hasError) return Center(child: Text('Gagal memuat $title: ${snapshot.error}'));
+      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+      final docs = snapshot.data!.docs;
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        floatingActionButton: FloatingActionButton.extended(onPressed: () => _edit(context), icon: const Icon(Icons.add), label: Text('Tambah $title')),
+        body: docs.isEmpty
+          ? Center(child: Text('Belum ada data $title. Tekan Tambah $title untuk memulai.'))
+          : ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 90), children: docs.map((doc) {
+              final d = doc.data();
+              final parent = level == 'rw' ? (d['kawilNama'] ?? '') : level == 'rt' ? (d['rwNama'] ?? '') : '';
+              return Card(child: ListTile(
+                leading: CircleAvatar(child: Icon(level == 'kawil' ? Icons.map_outlined : level == 'rw' ? Icons.account_tree_outlined : Icons.home_work_outlined)),
+                title: Text((d['nama'] ?? '-').toString()),
+                subtitle: Text('${level == 'kawil' ? 'Wilayah Kawil' : 'Di bawah $parent'}${(d['ketuaNama'] ?? '').toString().isNotEmpty ? '\nKetua: ${d['ketuaNama']}' : '\nBelum ada ketua'}'),
+                isThreeLine: true,
+                trailing: PopupMenuButton<String>(onSelected: (v) async {
+                  if (v == 'assign') await _assign(context, doc.id, d);
+                  if (v == 'edit') await _edit(context, id: doc.id, initial: d);
+                  if (v == 'delete') {
+                    final ok = await confirmDelete(context);
+                    if (ok == true) {
+                      try { await doc.reference.update({'aktif': false, 'updatedAt': FieldValue.serverTimestamp()}); if (context.mounted) showMessage(context, '$title dinonaktifkan.'); }
+                      catch (e) { if (context.mounted) showMessage(context, 'Gagal menonaktifkan: $e'); }
+                    }
+                  }
+                }, itemBuilder: (_) => [
+                  if (allowAssign) const PopupMenuItem(value: 'assign', child: Text('Tetapkan ketua dari Sensus')),
+                  const PopupMenuItem(value: 'edit', child: Text('Edit wilayah')),
+                  const PopupMenuItem(value: 'delete', child: Text('Nonaktifkan')),
+                ]),
+              ));
+            }).toList()),
+      );
+    },
+  );
 }
 
 class UserManagementPage extends StatelessWidget {
