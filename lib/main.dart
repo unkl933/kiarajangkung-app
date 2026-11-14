@@ -35,10 +35,12 @@ class KampungDigitalApp extends StatelessWidget {
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: accent).copyWith(
           primary: accent,
-          secondary: const Color(0xFF477C9D),
+          secondary: accent,
+          tertiary: const Color(0xFFD98589),
           surface: Colors.white,
+          error: const Color(0xFFB93838),
         ),
-        scaffoldBackgroundColor: const Color(0xFFF7F7F8),
+        scaffoldBackgroundColor: const Color(0xFFF8F6F6),
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
           foregroundColor: ink,
@@ -50,11 +52,14 @@ class KampungDigitalApp extends StatelessWidget {
         navigationBarTheme: NavigationBarThemeData(
           backgroundColor: Colors.white,
           indicatorColor: const Color(0xFFFCEAEA),
-          elevation: 8,
+          elevation: 5,
           labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
             fontSize: 11,
             fontWeight: states.contains(WidgetState.selected) ? FontWeight.w800 : FontWeight.w500,
             color: states.contains(WidgetState.selected) ? accent : const Color(0xFF777D86),
+          )),
+          iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
+            color: states.contains(WidgetState.selected) ? accent : const Color(0xFF858B94),
           )),
         ),
         inputDecorationTheme: InputDecorationTheme(
@@ -72,7 +77,7 @@ class KampungDigitalApp extends StatelessWidget {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: accent, width: 1.4),
+            borderSide: const BorderSide(color: accent, width: 1.5),
           ),
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
         ),
@@ -84,6 +89,36 @@ class KampungDigitalApp extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
             side: const BorderSide(color: Color(0xFFEDEFF1)),
           ),
+        ),
+        dialogTheme: DialogThemeData(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          titleTextStyle: const TextStyle(color: ink, fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        bottomSheetTheme: const BottomSheetThemeData(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          showDragHandle: false,
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: accent,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: accent,
+            side: const BorderSide(color: Color(0xFFE7BFC1)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(foregroundColor: accent),
         ),
         dividerTheme: const DividerThemeData(color: Color(0xFFEDEEF1), thickness: 1),
       ),
@@ -964,7 +999,7 @@ class _HomePageState extends State<HomePage> {
                   style: const TextStyle(color: Color(0xFF252932), fontSize: 18, fontWeight: FontWeight.w800)),
               ])),
               Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                decoration: BoxDecoration(color: const Color(0xFFF7F7F8), borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(color: const Color(0xFFF8F6F6), borderRadius: BorderRadius.circular(12)),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                   Text(dayNames[now.weekday-1], style: const TextStyle(fontSize: 10, color: Color(0xFF858B94))),
                   Text(dateText, style: const TextStyle(fontSize: 10, color: Color(0xFF252932), fontWeight: FontWeight.w700)),
@@ -1024,12 +1059,12 @@ class _HomePageState extends State<HomePage> {
           crossAxisCount: 3, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
           crossAxisSpacing: 9, mainAxisSpacing: 9, childAspectRatio: .98,
           children: [
-            _DashboardService(icon: Icons.emergency_rounded, title: 'Kontak Darurat', color: const Color(0xFFD94B45), onTap: () => openModule('kontak_darurat')),
-            _DashboardService(icon: Icons.health_and_safety_rounded, title: 'Fasilitas Kesehatan', color: const Color(0xFF26966C), onTap: () => openModule('fasilitas_kesehatan')),
-            _DashboardService(icon: Icons.account_balance_rounded, title: 'Profil Kampung', color: const Color(0xFF3979B9), onTap: () => openModule('profil_kampung')),
-            _DashboardService(icon: Icons.mosque_rounded, title: 'Jadwal Sholat', color: const Color(0xFF9A7A32), onTap: () => _showPrayerInfo(context)),
-            _DashboardService(icon: Icons.shield_moon_rounded, title: 'Jadwal Ronda', color: const Color(0xFF586B9B), onTap: () => openModule('ronda')),
-            _DashboardService(icon: Icons.event_note_rounded, title: 'Agenda Desa', color: const Color(0xFFB36A38), onTap: () => openModule('pengumuman')),
+            _DashboardService(icon: Icons.emergency_rounded, title: 'Kontak Darurat', color: const Color(0xFFC94B4B), onTap: () => openModule('kontak_darurat')),
+            _DashboardService(icon: Icons.health_and_safety_rounded, title: 'Fasilitas Kesehatan', color: const Color(0xFFB84B54), onTap: () => openModule('fasilitas_kesehatan')),
+            _DashboardService(icon: Icons.account_balance_rounded, title: 'Profil Kampung', color: const Color(0xFFC94B4B), onTap: () => openModule('profil_kampung')),
+            _DashboardService(icon: Icons.mosque_rounded, title: 'Jadwal Sholat', color: const Color(0xFFA93643), onTap: () => _showPrayerInfo(context)),
+            _DashboardService(icon: Icons.shield_moon_rounded, title: 'Jadwal Ronda', color: const Color(0xFFC94B4B), onTap: () => openModule('ronda')),
+            _DashboardService(icon: Icons.event_note_rounded, title: 'Agenda Desa', color: const Color(0xFFC8757A), onTap: () => openModule('pengumuman')),
           ],
         ),
         const SizedBox(height: 20),
@@ -1143,9 +1178,9 @@ class _DashboardPrayerScheduleState extends State<DashboardPrayerSchedule> {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(color: const Color(0xFFF0F6F2), borderRadius: BorderRadius.circular(18), border: Border.all(color: const Color(0xFFDCEAE1))),
+    decoration: BoxDecoration(color: const Color(0xFFFCEAEA), borderRadius: BorderRadius.circular(18), border: Border.all(color: const Color(0xFFEDE1E2))),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: const [Icon(Icons.mosque_rounded, color: Color(0xFF167C55)), SizedBox(width: 8), Expanded(child: Text('Jadwal Sholat Kiarajangkung', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)))]),
+      Row(children: const [Icon(Icons.mosque_rounded, color: Color(0xFFB83E48)), SizedBox(width: 8), Expanded(child: Text('Jadwal Sholat Kiarajangkung', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)))]),
       const SizedBox(height: 4),
       Text('Koordinat -7.2007, 108.1290 • ${DateTime.now().day.toString().padLeft(2,'0')}-${DateTime.now().month.toString().padLeft(2,'0')}-${DateTime.now().year}', style: const TextStyle(fontSize: 10, color: Colors.black54)),
       const SizedBox(height: 12),
@@ -1262,12 +1297,12 @@ class DashboardEmergencyPreview extends StatelessWidget {
             return SizedBox(width: 248, child: Card(child: InkWell(
               borderRadius: BorderRadius.circular(18), onTap: () => _showDetail(context, d),
               child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [const CircleAvatar(backgroundColor: Color(0xFFFFE8E6), child: Icon(Icons.emergency, color: Color(0xFFD94B45))), const SizedBox(width: 9), Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)))]),
+                Row(children: [const CircleAvatar(backgroundColor: Color(0xFFFCEAEA), child: Icon(Icons.emergency, color: Color(0xFFC94B4B))), const SizedBox(width: 9), Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)))]),
                 const Spacer(), Text(phone.isEmpty ? 'Nomor belum tersedia' : phone, style: const TextStyle(fontSize: 12)), const SizedBox(height: 4),
                 Row(children: [
-                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'Telepon', onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call, color: Color(0xFF21865D))),
-                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'WhatsApp', onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat, color: Color(0xFF21865D))),
-                  const Spacer(), const Text('Detail', style: TextStyle(fontSize: 11, color: Color(0xFF21865D))),
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'Telepon', onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call, color: Color(0xFFC94B4B))),
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'WhatsApp', onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat, color: Color(0xFFC94B4B))),
+                  const Spacer(), const Text('Detail', style: TextStyle(fontSize: 11, color: Color(0xFFC94B4B))),
                 ]),
               ])),
             )));
@@ -1324,12 +1359,12 @@ class DashboardHealthPreview extends StatelessWidget {
             return SizedBox(width: 258, child: Card(child: InkWell(
               borderRadius: BorderRadius.circular(18), onTap: () => _showDetail(context, d),
               child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [const CircleAvatar(backgroundColor: Color(0xFFE4F3EB), child: Icon(Icons.health_and_safety, color: Color(0xFF21865D))), const SizedBox(width: 9), Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)))]),
+                Row(children: [const CircleAvatar(backgroundColor: Color(0xFFFCEAEA), child: Icon(Icons.health_and_safety, color: Color(0xFFC94B4B))), const SizedBox(width: 9), Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)))]),
                 const SizedBox(height: 8), Expanded(child: Text(address.isEmpty ? 'Alamat belum tersedia' : address, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11))),
                 Row(children: [
-                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'Telepon', onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call, color: Color(0xFF21865D))),
-                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'WhatsApp', onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat, color: Color(0xFF21865D))),
-                  const Spacer(), const Text('Detail', style: TextStyle(fontSize: 11, color: Color(0xFF21865D))),
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'Telepon', onPressed: () => _openPhone(context, phone), icon: const Icon(Icons.call, color: Color(0xFFC94B4B))),
+                  if (phone.isNotEmpty) IconButton(visualDensity: VisualDensity.compact, tooltip: 'WhatsApp', onPressed: () => _openWhatsApp(context, phone), icon: const Icon(Icons.chat, color: Color(0xFFC94B4B))),
+                  const Spacer(), const Text('Detail', style: TextStyle(fontSize: 11, color: Color(0xFFC94B4B))),
                 ]),
               ])),
             )));
@@ -1394,7 +1429,7 @@ class _RondaSchedulePageState extends State<RondaSchedulePage> {
               if (!snap.hasData) return const Center(child: CircularProgressIndicator());
               final all = snap.data!.docs;
               return ListView(padding: const EdgeInsets.all(16), children: [
-                Container(padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: const Color(0xFFEAF4ED), borderRadius: BorderRadius.circular(18)), child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Container(padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: const Color(0xFFFCEAEA), borderRadius: BorderRadius.circular(18)), child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('Jadwal Piket Keamanan Lingkungan', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
                   SizedBox(height: 5), Text('Warga dapat melihat jadwal seluruh hari. Absensi dan status berhalangan hanya dapat diisi untuk diri sendiri.'),
                 ])),
@@ -1408,7 +1443,7 @@ class _RondaSchedulePageState extends State<RondaSchedulePage> {
                   children: List.generate(7, (i) {
                     final selected = selectedDay == i;
                     return InkWell(onTap:() => setState(() => selectedDay=i), borderRadius:BorderRadius.circular(12), child: Container(
-                      alignment:Alignment.center, decoration:BoxDecoration(color:selected?const Color(0xFF167C55):Colors.white, borderRadius:BorderRadius.circular(12), border:Border.all(color:selected?const Color(0xFF167C55):const Color(0xFFDCE5DE))),
+                      alignment:Alignment.center, decoration:BoxDecoration(color:selected?const Color(0xFFB83E48):Colors.white, borderRadius:BorderRadius.circular(12), border:Border.all(color:selected?const Color(0xFFB83E48):const Color(0xFFEDE1E2))),
                       child: Column(mainAxisAlignment:MainAxisAlignment.center, children:[Text(days[i], style:TextStyle(fontWeight:FontWeight.w700,color:selected?Colors.white:Colors.black87)), Text(dateLabel(weekStart.add(Duration(days:i))).substring(0,5), style:TextStyle(fontSize:10,color:selected?Colors.white70:Colors.black54))]),
                     ));
                   }),
@@ -1507,7 +1542,7 @@ Future<void> showRondaScheduleForm(BuildContext context,{String? docId,Map<Strin
   final search=TextEditingController(); final rt=TextEditingController(text:(initial?['rt']??'').toString()); final rw=TextEditingController(text:(initial?['rw']??'').toString()); final start=TextEditingController(text:(initial?['jamMulai']??'21.00').toString()); final finish=TextEditingController(text:(initial?['jamSelesai']??'04.00').toString());
   final days=['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu']; String day=(initial?['hari']??days[DateTime.now().weekday-1]).toString();
   final selected=<String>{}; final existing=initial?['petugas']; if(existing is List){for(final e in existing){if(e is Map && e['wargaId']!=null)selected.add(e['wargaId'].toString());}}
-  await showModalBottomSheet(context:context,isScrollControlled:true,backgroundColor:Colors.transparent,builder:(ctx)=>Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx).viewInsets.bottom),child:Container(height:MediaQuery.of(ctx).size.height*.88,padding:const EdgeInsets.all(16),decoration:const BoxDecoration(color:Color(0xFFF5F8F6),borderRadius:BorderRadius.vertical(top:Radius.circular(24))),child:StatefulBuilder(builder:(ctx,setStateSheet){final filtered=residents.where((r){final q=search.text.toLowerCase();final n=(r['nama']??'').toString().toLowerCase();final residentRt=(r['rt']??'').toString().toLowerCase();return (q.isEmpty||n.contains(q))&&(rt.text.trim().isEmpty||residentRt==rt.text.trim().toLowerCase());}).toList();return Column(children:[Text(docId==null?'Buat Jadwal Ronda':'Edit Jadwal Ronda',style:Theme.of(ctx).textTheme.titleLarge),const SizedBox(height:10),DropdownButtonFormField<String>(value:day,decoration:const InputDecoration(labelText:'Hari ronda'),items:days.map((d)=>DropdownMenuItem(value:d,child:Text(d))).toList(),onChanged:(v){if(v!=null)setStateSheet(()=>day=v);}),const SizedBox(height:8),Row(children:[Expanded(child:TextField(controller:rt,decoration:const InputDecoration(labelText:'RT'),onChanged:(_)=>setStateSheet((){}))),const SizedBox(width:8),Expanded(child:TextField(controller:rw,decoration:const InputDecoration(labelText:'RW')))]),const SizedBox(height:8),Row(children:[Expanded(child:TextField(controller:start,decoration:const InputDecoration(labelText:'Jam mulai'))),const SizedBox(width:8),Expanded(child:TextField(controller:finish,decoration:const InputDecoration(labelText:'Jam selesai')))]),const SizedBox(height:8),TextField(controller:search,decoration:const InputDecoration(prefixIcon:Icon(Icons.search),labelText:'Cari nama warga laki-laki'),onChanged:(_)=>setStateSheet((){})),const SizedBox(height:8),Align(alignment:Alignment.centerLeft,child:Text('Pilih petugas (${selected.length})',style:const TextStyle(fontWeight:FontWeight.bold))),Expanded(child:filtered.isEmpty?const Center(child:Text('Tidak ada warga laki-laki pada RT ini.')):ListView.builder(itemCount:filtered.length,itemBuilder:(_,i){final r=filtered[i];final id=(r['wargaId']??'').toString();return CheckboxListTile(value:selected.contains(id),title:Text((r['nama']??'Tanpa nama').toString()),subtitle:Text('RT ${r['rt']??'-'} / RW ${r['rw']??'-'}'),onChanged:(v)=>setStateSheet((){if(v==true)selected.add(id);else selected.remove(id);}));})),Row(children:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),const Spacer(),FilledButton(onPressed:selected.isEmpty?null:()async{final picked=residents.where((r)=>selected.contains((r['wargaId']??'').toString())).toList();final petugas=picked.map((r)=>{'wargaId':r['wargaId'],'uid':r['accountUid']??'','nama':r['nama']??'','rt':r['rt']??'','rw':r['rw']??''}).toList();final payload={'hari':day,'rt':rt.text.trim(),'rw':rw.text.trim(),'jamMulai':start.text.trim(),'jamSelesai':finish.text.trim(),'petugas':petugas,'anggotaUid':petugas.map((e)=>e['uid']).where((e)=>e.toString().isNotEmpty).toList(),'anggota':petugas.map((e)=>e['nama']).join(', '),'updatedAt':FieldValue.serverTimestamp(),'updatedBy':Db.auth.currentUser?.uid};if(docId==null){payload['createdAt']=FieldValue.serverTimestamp();await Db.module('ronda').add(payload);}else{await Db.module('ronda').doc(docId).update(payload);}if(ctx.mounted)Navigator.pop(ctx);if(context.mounted)showMessage(context,'Jadwal ronda berhasil disimpan.');},child:const Text('Simpan Jadwal'))])]);})))); 
+  await showModalBottomSheet(context:context,isScrollControlled:true,backgroundColor:Colors.transparent,builder:(ctx)=>Padding(padding:EdgeInsets.only(bottom:MediaQuery.of(ctx).viewInsets.bottom),child:Container(height:MediaQuery.of(ctx).size.height*.88,padding:const EdgeInsets.all(16),decoration:const BoxDecoration(color:Color(0xFFF9F3F3),borderRadius:BorderRadius.vertical(top:Radius.circular(24))),child:StatefulBuilder(builder:(ctx,setStateSheet){final filtered=residents.where((r){final q=search.text.toLowerCase();final n=(r['nama']??'').toString().toLowerCase();final residentRt=(r['rt']??'').toString().toLowerCase();return (q.isEmpty||n.contains(q))&&(rt.text.trim().isEmpty||residentRt==rt.text.trim().toLowerCase());}).toList();return Column(children:[Text(docId==null?'Buat Jadwal Ronda':'Edit Jadwal Ronda',style:Theme.of(ctx).textTheme.titleLarge),const SizedBox(height:10),DropdownButtonFormField<String>(value:day,decoration:const InputDecoration(labelText:'Hari ronda'),items:days.map((d)=>DropdownMenuItem(value:d,child:Text(d))).toList(),onChanged:(v){if(v!=null)setStateSheet(()=>day=v);}),const SizedBox(height:8),Row(children:[Expanded(child:TextField(controller:rt,decoration:const InputDecoration(labelText:'RT'),onChanged:(_)=>setStateSheet((){}))),const SizedBox(width:8),Expanded(child:TextField(controller:rw,decoration:const InputDecoration(labelText:'RW')))]),const SizedBox(height:8),Row(children:[Expanded(child:TextField(controller:start,decoration:const InputDecoration(labelText:'Jam mulai'))),const SizedBox(width:8),Expanded(child:TextField(controller:finish,decoration:const InputDecoration(labelText:'Jam selesai')))]),const SizedBox(height:8),TextField(controller:search,decoration:const InputDecoration(prefixIcon:Icon(Icons.search),labelText:'Cari nama warga laki-laki'),onChanged:(_)=>setStateSheet((){})),const SizedBox(height:8),Align(alignment:Alignment.centerLeft,child:Text('Pilih petugas (${selected.length})',style:const TextStyle(fontWeight:FontWeight.bold))),Expanded(child:filtered.isEmpty?const Center(child:Text('Tidak ada warga laki-laki pada RT ini.')):ListView.builder(itemCount:filtered.length,itemBuilder:(_,i){final r=filtered[i];final id=(r['wargaId']??'').toString();return CheckboxListTile(value:selected.contains(id),title:Text((r['nama']??'Tanpa nama').toString()),subtitle:Text('RT ${r['rt']??'-'} / RW ${r['rw']??'-'}'),onChanged:(v)=>setStateSheet((){if(v==true)selected.add(id);else selected.remove(id);}));})),Row(children:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),const Spacer(),FilledButton(onPressed:selected.isEmpty?null:()async{final picked=residents.where((r)=>selected.contains((r['wargaId']??'').toString())).toList();final petugas=picked.map((r)=>{'wargaId':r['wargaId'],'uid':r['accountUid']??'','nama':r['nama']??'','rt':r['rt']??'','rw':r['rw']??''}).toList();final payload={'hari':day,'rt':rt.text.trim(),'rw':rw.text.trim(),'jamMulai':start.text.trim(),'jamSelesai':finish.text.trim(),'petugas':petugas,'anggotaUid':petugas.map((e)=>e['uid']).where((e)=>e.toString().isNotEmpty).toList(),'anggota':petugas.map((e)=>e['nama']).join(', '),'updatedAt':FieldValue.serverTimestamp(),'updatedBy':Db.auth.currentUser?.uid};if(docId==null){payload['createdAt']=FieldValue.serverTimestamp();await Db.module('ronda').add(payload);}else{await Db.module('ronda').doc(docId).update(payload);}if(ctx.mounted)Navigator.pop(ctx);if(context.mounted)showMessage(context,'Jadwal ronda berhasil disimpan.');},child:const Text('Simpan Jadwal'))])]);})))); 
   search.dispose();rt.dispose();rw.dispose();start.dispose();finish.dispose();
 }
 
@@ -1605,7 +1640,7 @@ class DashboardRondaPreview extends StatelessWidget {
       }
       if(matches.isEmpty)return const SizedBox.shrink();
       matches.sort((a,b)=>(a['date'] as DateTime).compareTo(b['date'] as DateTime));
-      return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const _DashboardSectionTitle(title:'Jadwal Ronda Anda'),...matches.map((m){final d=m['data'] as Map<String,dynamic>;final date=m['date'] as DateTime;return Card(child:ListTile(leading:const CircleAvatar(backgroundColor:Color(0xFFE9EDF7),child:Icon(Icons.shield_moon,color:Color(0xFF586B9B))),title:Text('${m['day']}, ${date.day}-${date.month}-${date.year}',style:const TextStyle(fontWeight:FontWeight.bold)),subtitle:Text('RT ${d['rt']??'-'} / RW ${d['rw']??'-'} • ${d['jamMulai']??'21.00'}–${d['jamSelesai']??'04.00'}'),onTap:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>const ModulePage(module:ModuleInfo('ronda','Jadwal Ronda','Jadwal ronda',Icons.nightlight_outlined),isAdmin:false)))));})]);
+      return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const _DashboardSectionTitle(title:'Jadwal Ronda Anda'),...matches.map((m){final d=m['data'] as Map<String,dynamic>;final date=m['date'] as DateTime;return Card(child:ListTile(leading:const CircleAvatar(backgroundColor:Color(0xFFFCEAEA),child:Icon(Icons.shield_moon,color:Color(0xFFC94B4B))),title:Text('${m['day']}, ${date.day}-${date.month}-${date.year}',style:const TextStyle(fontWeight:FontWeight.bold)),subtitle:Text('RT ${d['rt']??'-'} / RW ${d['rw']??'-'} • ${d['jamMulai']??'21.00'}–${d['jamSelesai']??'04.00'}'),onTap:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>const ModulePage(module:ModuleInfo('ronda','Jadwal Ronda','Jadwal ronda',Icons.nightlight_outlined),isAdmin:false)))));})]);
     });
       },
     );
@@ -1630,8 +1665,8 @@ class _DashboardPopulationStatsState extends State<DashboardPopulationStats> {
       const Text('Statistik Penduduk', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
       const SizedBox(height: 4), const Text('Diperbarui otomatis dari Data Sensus Penduduk', style: TextStyle(fontSize: 10, color: Colors.black54)),
       const SizedBox(height: 12), Row(children: [
-        Expanded(child: _populationRing('Laki-laki', male, malePct, const Color(0xFF3979B9))),
-        Expanded(child: _populationRing('Perempuan', female, femalePct, const Color(0xFFD66A91))),
+        Expanded(child: _populationRing('Laki-laki', male, malePct, const Color(0xFFC94B4B))),
+        Expanded(child: _populationRing('Perempuan', female, femalePct, const Color(0xFFD98589))),
       ]),
       const Divider(height: 20), Row(children: [
         Expanded(child: _populationNumber('Total penduduk', total, Icons.groups_outlined)),
@@ -1679,12 +1714,12 @@ class _DashboardPopulationStatsState extends State<DashboardPopulationStats> {
 }
 Widget _genderCircle(String title, int count, double percent) => Column(children: [
   SizedBox(width: 76, height: 76, child: Stack(alignment: Alignment.center, children: [
-    SizedBox.expand(child: CircularProgressIndicator(value: percent, strokeWidth: 7, backgroundColor: const Color(0xFFE6EEE8), color: const Color(0xFF167C55))),
+    SizedBox.expand(child: CircularProgressIndicator(value: percent, strokeWidth: 7, backgroundColor: const Color(0xFFF1DADB), color: const Color(0xFFB83E48))),
     Text('${(percent*100).round()}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
   ])),
   const SizedBox(height: 5), Text('$title ($count)', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
 ]);
-Widget _statItem(String title,String value,IconData icon)=>Padding(padding:const EdgeInsets.symmetric(vertical:5),child:Column(children:[Icon(icon,color:const Color(0xFF167C55)),const SizedBox(height:4),Text(value,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:18)),Text(title,style:const TextStyle(fontSize:11,color:Colors.black54))]));
+Widget _statItem(String title,String value,IconData icon)=>Padding(padding:const EdgeInsets.symmetric(vertical:5),child:Column(children:[Icon(icon,color:const Color(0xFFB83E48)),const SizedBox(height:4),Text(value,style:const TextStyle(fontWeight:FontWeight.bold,fontSize:18)),Text(title,style:const TextStyle(fontSize:11,color:Colors.black54))]));
 
 
 Widget _populationRing(String label, int count, double pct, Color color) => Column(children: [
@@ -1695,7 +1730,7 @@ Widget _populationRing(String label, int count, double pct, Color color) => Colu
 ]);
 
 
-Widget _populationNumber(String label, int count, IconData icon) => Row(children: [Icon(icon, color: const Color(0xFF21865D)), const SizedBox(width: 7), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('$count', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)), Text(label, style: const TextStyle(fontSize: 10, color: Colors.black54))]))]);
+Widget _populationNumber(String label, int count, IconData icon) => Row(children: [Icon(icon, color: const Color(0xFFC94B4B)), const SizedBox(width: 7), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('$count', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17)), Text(label, style: const TextStyle(fontSize: 10, color: Colors.black54))]))]);
 
 class DashboardAnnouncements extends StatelessWidget {
   const DashboardAnnouncements({super.key});
@@ -1717,7 +1752,7 @@ class DashboardAnnouncements extends StatelessWidget {
       return Material(
         color: Colors.white,
         elevation: 5,
-        shadowColor: const Color(0x33167547),
+        shadowColor: const Color(0x33C94B4B),
         borderRadius: BorderRadius.circular(24),
         child: InkWell(
           borderRadius: BorderRadius.circular(24),
@@ -1737,12 +1772,12 @@ class DashboardAnnouncements extends StatelessWidget {
           child: Container(
             height: 66,
             padding: const EdgeInsets.symmetric(horizontal: 13),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), border: Border.all(color: const Color(0xFFE5EEE8))),
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), border: Border.all(color: const Color(0xFFF1DADB))),
             child: Row(children: [
-              Container(width: 38, height: 38, decoration: const BoxDecoration(color: Color(0xFF167C55), shape: BoxShape.circle), child: const Icon(Icons.campaign_rounded, color: Colors.white)),
+              Container(width: 38, height: 38, decoration: const BoxDecoration(color: Color(0xFFB83E48), shape: BoxShape.circle), child: const Icon(Icons.campaign_rounded, color: Colors.white)),
               const SizedBox(width: 11),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-                const Text('PENGUMUMAN KAMPUNG', style: TextStyle(color: Color(0xFF167C55), fontWeight: FontWeight.w800, fontSize: 9, letterSpacing: .5)),
+                const Text('PENGUMUMAN KAMPUNG', style: TextStyle(color: Color(0xFFB83E48), fontWeight: FontWeight.w800, fontSize: 9, letterSpacing: .5)),
                 const SizedBox(height: 4),
                 Expanded(child: Align(alignment: Alignment.centerLeft, child: _MarqueeText(text: message))),
               ])),
@@ -1944,13 +1979,13 @@ class ProfileKampungPage extends StatelessWidget {
       children: [
         Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: const Color(0xFFEAF4ED), borderRadius: BorderRadius.circular(16)),
+          decoration: BoxDecoration(color: const Color(0xFFFCEAEA), borderRadius: BorderRadius.circular(16)),
           child: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Profil Kampung Kiarajangkung', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             SizedBox(height: 5),
             Text('Informasi kampung disajikan dalam 8 bagian. Data historis diberi penanda tahun agar tidak dianggap sebagai data terbaru.'),
             SizedBox(height: 8),
-            Text('Data historis: Tahun 2022', style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF39724F))),
+            Text('Data historis: Tahun 2022', style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFFB84B54))),
           ]),
         ),
         const SizedBox(height: 14),
@@ -1963,7 +1998,7 @@ class ProfileKampungPage extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 9),
           child: ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-            leading: CircleAvatar(backgroundColor: const Color(0xFFEAF4ED), child: Icon(section.icon, color: const Color(0xFF39724F))),
+            leading: CircleAvatar(backgroundColor: const Color(0xFFFCEAEA), child: Icon(section.icon, color: const Color(0xFFB84B54))),
             title: Text(section.title, style: const TextStyle(fontWeight: FontWeight.w700)),
             subtitle: Text(section.subtitle),
             trailing: const Icon(Icons.chevron_right),
@@ -2095,7 +2130,7 @@ class ProfileKampungSectionPage extends StatelessWidget {
             final entries = fields.where((f) => (d[f.key] ?? '').toString().trim().isNotEmpty).toList();
             return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [Expanded(child: Text((d['judul'] ?? section.title).toString(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))), if (isAdmin) PopupMenuButton<String>(onSelected: (v) async { if (v == 'edit') { await _edit(context, docId: doc.id, initial: d); } else if (v == 'delete' && await confirmDelete(context) == true) { await doc.reference.delete(); } }, itemBuilder: (_) => const [PopupMenuItem(value: 'edit', child: Text('Edit')), PopupMenuItem(value: 'delete', child: Text('Hapus'))])]),
-              Text('Data Tahun ${d['tahunData'] ?? 2022}', style: const TextStyle(color: Color(0xFF39724F), fontWeight: FontWeight.w600, fontSize: 12)),
+              Text('Data Tahun ${d['tahunData'] ?? 2022}', style: const TextStyle(color: Color(0xFFB84B54), fontWeight: FontWeight.w600, fontSize: 12)),
               const SizedBox(height: 8),
               ...entries.map((f) => Padding(padding: const EdgeInsets.only(bottom: 9), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(f.label, style: const TextStyle(fontWeight: FontWeight.w600)), const SizedBox(height: 3), SelectableText(d[f.key].toString())]))),
               if ((d['catatanVerifikasi'] ?? '').toString().trim().isNotEmpty) Text('Catatan: ${d['catatanVerifikasi']}', style: const TextStyle(fontStyle: FontStyle.italic)),
@@ -2369,12 +2404,12 @@ class _ModulePageState extends State<ModulePage> {
 
 
 Widget _photoPlaceholder() => Container(
-  color: const Color(0xFFE8F1EC),
+  color: const Color(0xFFF8EDEE),
   alignment: Alignment.center,
   child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-    Icon(Icons.image_outlined, size: 42, color: Color(0xFF6B9B82)),
+    Icon(Icons.image_outlined, size: 42, color: Color(0xFFC8757A)),
     SizedBox(height: 6),
-    Text('Belum ada foto', style: TextStyle(color: Color(0xFF6B9B82))),
+    Text('Belum ada foto', style: TextStyle(color: Color(0xFFC8757A))),
   ]),
 );
 
@@ -2666,7 +2701,7 @@ Future<void> showRecordForm(
         constraints: BoxConstraints(maxHeight: MediaQuery.of(sheetContext).size.height * .88),
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
         decoration: const BoxDecoration(
-          color: Color(0xFFF5F8F6),
+          color: Color(0xFFF9F3F3),
           borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
         ),
         child: StatefulBuilder(
@@ -3691,7 +3726,7 @@ class _MigrasiSatuDataPageState extends State<MigrasiSatuDataPage> {
       if(_busy) const LinearProgressIndicator(),
       if(_fileName.isNotEmpty) Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Text('File: $_fileName')),
       if(_rows.isNotEmpty) ...[
-        Wrap(spacing:8,runSpacing:8,children:[_summaryChip('Total',_rows.length,Colors.blue),_summaryChip('Siap diterapkan',_readyCount,Colors.green),_summaryChip('Perlu perbaikan',_errorCount,Colors.orange)]),
+        Wrap(spacing:8,runSpacing:8,children:[_summaryChip('Total',_rows.length,const Color(0xFFC94B4B)),_summaryChip('Siap diterapkan',_readyCount,Colors.green),_summaryChip('Perlu perbaikan',_errorCount,Colors.orange)]),
         const SizedBox(height:10),
         DropdownButtonFormField<String>(value:_filter,decoration:const InputDecoration(labelText:'Filter hasil pemeriksaan'),items:['SEMUA','COCOK','BARU','DATA GANDA','AMBIGU','PERLU VERIFIKASI','TIDAK VALID','TIDAK COCOK'].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),onChanged:(v)=>setState(()=>_filter=v??'SEMUA')),
         const SizedBox(height:8),
@@ -3804,8 +3839,8 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           const Divider(height: 1),
           ListTile(
-            leading: const Icon(Icons.logout, color: Colors.red),
-            title: const Text('Keluar akun', style: TextStyle(color: Colors.red)),
+            leading: const Icon(Icons.logout, color: const Color(0xFFC94B4B)),
+            title: const Text('Keluar akun', style: TextStyle(color: const Color(0xFFC94B4B))),
             onTap: () async => Db.auth.signOut(),
           ),
         ])),
@@ -3965,7 +4000,7 @@ class _InformasiDiriPageState extends State<InformasiDiriPage>{
     }
   }
 
-  @override Widget build(BuildContext context){final user=Db.auth.currentUser; if(user==null)return const Scaffold(body:Center(child:Text('Silakan login kembali.')));return Scaffold(appBar:AppBar(title:const Text('Informasi Diri')),body:StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.user(user.uid).snapshots(),builder:(context,userSnap){if(!userSnap.hasData)return const Center(child:CircularProgressIndicator());final profile=userSnap.data!.data()??{};final wargaId=(profile['wargaId']??'').toString();if(wargaId.isEmpty)return const Center(child:Padding(padding:EdgeInsets.all(24),child:Text('Akun ini belum terhubung dengan data Sensus. Silakan hubungi Admin/Owner.')));return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.module('sensus').doc(wargaId).snapshots(),builder:(context,snap){if(snap.hasError)return Center(child:Text('Gagal memuat Sensus: ${snap.error}'));if(!snap.hasData)return const Center(child:CircularProgressIndicator());final data=snap.data!.data();if(data==null)return const Center(child:Text('Data Sensus milik akun ini tidak ditemukan.'));final entries=data.entries.where((e)=>!{'roles','role','accountUid','wargaId','createdAt','createdBy','updatedAt','updatedBy'}.contains(e.key));final roles=(profile['roles'] is List)?(profile['roles'] as List).join(', '):(profile['role']??'warga').toString();return ListView(padding:const EdgeInsets.all(16),children:[Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFFEAF4ED),borderRadius:BorderRadius.circular(16)),child:const Text('Data ini terhubung langsung dengan Sensus Penduduk. Nama asli, NIK, Nomor KK, dan Role dikunci untuk menjaga keakuratan identitas.')),const SizedBox(height:12),Card(child:ListTile(title:const Text('Role / Hak Akses'),subtitle:Text(roles),trailing:const Icon(Icons.lock_outline))),...entries.map((e){final isLocked={'nama','nik','noKK'}.contains(e.key);final labels={'nama':'Nama Asli','nik':'NIK','noKK':'Nomor KK','jenisKelamin':'Jenis kelamin','tempatLahir':'Tempat lahir','tanggalLahir':'Tanggal lahir','telepon':'Nomor HP / WhatsApp','agama':'Agama','statusPerkawinan':'Status perkawinan','pendidikan':'Pendidikan','pekerjaan':'Pekerjaan','hubunganKeluarga':'Hubungan keluarga','kawil':'Kawil / Dusun','rw':'RW','rt':'RT','alamat':'Alamat'};return Card(child:ListTile(title:Text(labels[e.key]??e.key),subtitle:Text(e.value.toString().isEmpty?'Belum diisi':e.value.toString()),trailing:isLocked?const Icon(Icons.lock_outline,size:18):null));}),const SizedBox(height:12),StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:_migrationConfig.snapshots(),builder:(context,lockSnap){final lockedForUpdate=lockSnap.data?.data()?['lockResidentEdits']==true;return Column(children:[if(lockedForUpdate)Container(width:double.infinity,padding:const EdgeInsets.all(14),margin:const EdgeInsets.only(bottom:10),decoration:BoxDecoration(color:Colors.orange.shade50,borderRadius:BorderRadius.circular(12),border:Border.all(color:Colors.orange.shade200)),child:const Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(Icons.warning_amber_rounded,color:Colors.orange),SizedBox(width:8),Expanded(child:Text('Pembaruan Data Sensus sedang berlangsung. Untuk sementara Anda hanya dapat melihat data. Perubahan data pribadi akan dibuka kembali setelah proses selesai.'))])),SizedBox(width:double.infinity,child:FilledButton.icon(onPressed:lockedForUpdate?null:()=>edit(data,wargaId),icon:Icon(lockedForUpdate?Icons.lock_outline:Icons.edit_outlined),label:Text(lockedForUpdate?'Perubahan Data Dikunci':'Edit / Perbarui Data')))]);})]);});}));}
+  @override Widget build(BuildContext context){final user=Db.auth.currentUser; if(user==null)return const Scaffold(body:Center(child:Text('Silakan login kembali.')));return Scaffold(appBar:AppBar(title:const Text('Informasi Diri')),body:StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.user(user.uid).snapshots(),builder:(context,userSnap){if(!userSnap.hasData)return const Center(child:CircularProgressIndicator());final profile=userSnap.data!.data()??{};final wargaId=(profile['wargaId']??'').toString();if(wargaId.isEmpty)return const Center(child:Padding(padding:EdgeInsets.all(24),child:Text('Akun ini belum terhubung dengan data Sensus. Silakan hubungi Admin/Owner.')));return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.module('sensus').doc(wargaId).snapshots(),builder:(context,snap){if(snap.hasError)return Center(child:Text('Gagal memuat Sensus: ${snap.error}'));if(!snap.hasData)return const Center(child:CircularProgressIndicator());final data=snap.data!.data();if(data==null)return const Center(child:Text('Data Sensus milik akun ini tidak ditemukan.'));final entries=data.entries.where((e)=>!{'roles','role','accountUid','wargaId','createdAt','createdBy','updatedAt','updatedBy'}.contains(e.key));final roles=(profile['roles'] is List)?(profile['roles'] as List).join(', '):(profile['role']??'warga').toString();return ListView(padding:const EdgeInsets.all(16),children:[Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFFFCEAEA),borderRadius:BorderRadius.circular(16)),child:const Text('Data ini terhubung langsung dengan Sensus Penduduk. Nama asli, NIK, Nomor KK, dan Role dikunci untuk menjaga keakuratan identitas.')),const SizedBox(height:12),Card(child:ListTile(title:const Text('Role / Hak Akses'),subtitle:Text(roles),trailing:const Icon(Icons.lock_outline))),...entries.map((e){final isLocked={'nama','nik','noKK'}.contains(e.key);final labels={'nama':'Nama Asli','nik':'NIK','noKK':'Nomor KK','jenisKelamin':'Jenis kelamin','tempatLahir':'Tempat lahir','tanggalLahir':'Tanggal lahir','telepon':'Nomor HP / WhatsApp','agama':'Agama','statusPerkawinan':'Status perkawinan','pendidikan':'Pendidikan','pekerjaan':'Pekerjaan','hubunganKeluarga':'Hubungan keluarga','kawil':'Kawil / Dusun','rw':'RW','rt':'RT','alamat':'Alamat'};return Card(child:ListTile(title:Text(labels[e.key]??e.key),subtitle:Text(e.value.toString().isEmpty?'Belum diisi':e.value.toString()),trailing:isLocked?const Icon(Icons.lock_outline,size:18):null));}),const SizedBox(height:12),StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:_migrationConfig.snapshots(),builder:(context,lockSnap){final lockedForUpdate=lockSnap.data?.data()?['lockResidentEdits']==true;return Column(children:[if(lockedForUpdate)Container(width:double.infinity,padding:const EdgeInsets.all(14),margin:const EdgeInsets.only(bottom:10),decoration:BoxDecoration(color:Colors.orange.shade50,borderRadius:BorderRadius.circular(12),border:Border.all(color:Colors.orange.shade200)),child:const Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(Icons.warning_amber_rounded,color:Colors.orange),SizedBox(width:8),Expanded(child:Text('Pembaruan Data Sensus sedang berlangsung. Untuk sementara Anda hanya dapat melihat data. Perubahan data pribadi akan dibuka kembali setelah proses selesai.'))])),SizedBox(width:double.infinity,child:FilledButton.icon(onPressed:lockedForUpdate?null:()=>edit(data,wargaId),icon:Icon(lockedForUpdate?Icons.lock_outline:Icons.edit_outlined),label:Text(lockedForUpdate?'Perubahan Data Dikunci':'Edit / Perbarui Data')))]);})]);});}));}
 }
 
 class EditProfilePage extends StatefulWidget {
@@ -4409,7 +4444,7 @@ Future<bool?> confirmDelete(BuildContext context) => showDialog<bool>(
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC94B4B)),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Hapus'),
           ),
@@ -4482,95 +4517,240 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
   final phone = (data['telepon'] ?? data['whatsapp'] ?? '').toString().trim();
   final maps = (data['lokasiMaps'] ?? data['googleMaps'] ?? '').toString().trim();
   final address = (data['alamat'] ?? data['lokasi'] ?? '').toString().trim();
+  final photo = (data['fotoUrl'] ?? data['foto'] ?? data['imageUrl'] ?? '').toString().trim();
+  final category = (data['kategori'] ?? data['jenis'] ?? data['jenisFasilitas'] ?? '').toString().trim();
+  final isAnnouncement = category.toLowerCase().contains('pengumuman') ||
+      data.containsKey('prioritas') || data.containsKey('tanggal');
+  final detailEntries = data.entries.where((e) =>
+      !excluded.contains(e.key) &&
+      !{'telepon', 'whatsapp', 'lokasiMaps', 'googleMaps', 'fotoUrl', 'foto', 'imageUrl',
+        'riwayatPemilik', 'wargaId', 'accountUid', 'roles', 'role', 'ketuaUid',
+        'anggotaWarga', 'anggotaWargaIds', 'kawilId', 'rwId', 'rtId',
+        'pemilikNamaSnapshot', 'pemilikMulaiPada', 'statusAkunSebelumArsip'}.contains(e.key) &&
+      !e.key.endsWith('WargaId') && !e.key.endsWith('Nik') && !e.key.endsWith('Uid'));
+
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    builder: (sheetContext) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(22),
-        child: SingleChildScrollView(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Builder(builder: (context) {
-              final photo = (data['fotoUrl'] ?? data['foto'] ?? data['imageUrl'] ?? '').toString().trim();
-              if (photo.isEmpty) return const SizedBox.shrink();
-              return Padding(padding: const EdgeInsets.only(bottom: 16), child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Image.network(photo, width: double.infinity, height: 220, fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => SizedBox(height: 120, child: _photoPlaceholder())),
-              ));
-            }),
-            Text(title, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-            if ((data['kategori'] ?? '').toString().toLowerCase().contains('pengumuman') || data.containsKey('prioritas') || data.containsKey('tanggal'))
-              Padding(
-                padding: const EdgeInsets.only(top: 10, bottom: 8),
-                child: SizedBox(width: double.infinity, child: OutlinedButton.icon(
-                  onPressed: () => shareAnnouncementToWhatsApp(sheetContext, data),
-                  icon: const Icon(Icons.chat, color: Colors.green),
-                  label: const Text('Bagikan ke WhatsApp Group'),
-                )),
-              ),
-            const SizedBox(height: 14),
-            if (phone.isNotEmpty) ...[
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.call, color: Colors.green),
-                title: const Text('Telepon kontak ini'),
-                subtitle: Text(phone),
-                onTap: () async {
-                  final dialNumber = phone.replaceAll(RegExp(r'[^0-9+]'), '');
-                  if (dialNumber.isEmpty) {
-                    showMessage(sheetContext, 'Nomor telepon belum valid.');
-                    return;
-                  }
-                  final dialUri = Uri(scheme: 'tel', path: dialNumber);
-                  final opened = await launchUrl(dialUri, mode: LaunchMode.externalApplication);
-                  if (!opened && sheetContext.mounted) {
-                    showMessage(sheetContext, 'Tidak dapat membuka aplikasi telepon.');
-                  }
-                },
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.chat, color: Colors.green),
-                title: const Text('Hubungi melalui WhatsApp'),
-                subtitle: Text(phone),
-                onTap: () => openWhatsApp(sheetContext, phone),
-              ),
-            ],
-            if (maps.isNotEmpty || address.isNotEmpty)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.location_on_outlined, color: Colors.red),
-                title: const Text('Buka lokasi di Google Maps'),
-                subtitle: Text(maps.isNotEmpty ? maps : address, maxLines: 2, overflow: TextOverflow.ellipsis),
-                onTap: () => openGoogleMaps(sheetContext, maps.isNotEmpty ? maps : address),
-              ),
-            if (data['riwayatPemilik'] is List && (data['riwayatPemilik'] as List).isNotEmpty) ...[
-              const Divider(),
-              const Text('Riwayat Kepemilikan UMKM', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 8),
-              ...(data['riwayatPemilik'] as List).whereType<Map>().map((item) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.history),
-                title: Text((item['nama'] ?? 'Pemilik').toString()),
-                subtitle: Text('${item['status'] ?? ''} • Mulai: ${_formatHistoryDate(item['mulaiPada'])} • Selesai: ${_formatHistoryDate(item['selesaiPada'])}'),
-              )),
-            ],
-            const Divider(),
-            ...data.entries.where((e) => !excluded.contains(e.key) &&
-                !{'telepon', 'whatsapp', 'lokasiMaps', 'googleMaps', 'fotoUrl', 'foto', 'imageUrl', 'riwayatPemilik', 'wargaId', 'accountUid', 'roles', 'role', 'ketuaUid', 'anggotaWarga', 'anggotaWargaIds', 'kawilId', 'rwId', 'rtId', 'pemilikNamaSnapshot', 'pemilikMulaiPada', 'statusAkunSebelumArsip'}.contains(e.key) &&
-                !e.key.endsWith('WargaId') && !e.key.endsWith('Nik') && !e.key.endsWith('Uid')).map((e) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(e.key.replaceAll('_', ' ').toUpperCase(), style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-                    const SizedBox(height: 3),
-                    Text(e.value?.toString() ?? '-'),
-                  ]),
-                )),
-          ]),
+    backgroundColor: Colors.transparent,
+    useSafeArea: true,
+    builder: (sheetContext) => Container(
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(sheetContext).size.height * .92),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF8F6F6),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          width: 42, height: 5,
+          margin: const EdgeInsets.only(top: 10, bottom: 8),
+          decoration: BoxDecoration(color: const Color(0xFFD8DADD), borderRadius: BorderRadius.circular(20)),
         ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFC94B4B), Color(0xFFA93643)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(22),
+                  boxShadow: const [BoxShadow(color: Color(0x22C94B4B), blurRadius: 16, offset: Offset(0, 7))],
+                ),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                  Container(
+                    width: 48, height: 48,
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(.17), borderRadius: BorderRadius.circular(15)),
+                    child: const Icon(Icons.article_rounded, color: Colors.white, size: 26),
+                  ),
+                  const SizedBox(width: 13),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('INFORMASI DETAIL', style: TextStyle(color: Color(0xFFFFE5E5), fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.1)),
+                    const SizedBox(height: 4),
+                    Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800, height: 1.2)),
+                    if (category.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(color: Colors.white.withOpacity(.16), borderRadius: BorderRadius.circular(30)),
+                        child: Text(category, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600))),
+                    ],
+                  ])),
+                ]),
+              ),
+              if (photo.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Image.network(photo, width: double.infinity, height: 205, fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => SizedBox(height: 120, child: _photoPlaceholder())),
+                ),
+              ],
+              if (isAnnouncement) ...[
+                const SizedBox(height: 14),
+                SizedBox(width: double.infinity, child: OutlinedButton.icon(
+                  onPressed: () => shareAnnouncementToWhatsApp(sheetContext, data),
+                  icon: const Icon(Icons.share_rounded),
+                  label: const Text('Bagikan pengumuman ke WhatsApp Group'),
+                )),
+              ],
+              if (phone.isNotEmpty || maps.isNotEmpty || address.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                const _RecordDetailHeading(title: 'Kontak dan lokasi', icon: Icons.contact_phone_outlined),
+                const SizedBox(height: 9),
+                if (phone.isNotEmpty) ...[
+                  _RecordActionTile(
+                    icon: Icons.call_rounded, title: 'Telepon', subtitle: phone,
+                    onTap: () async {
+                      final dialNumber = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+                      if (dialNumber.isEmpty) {
+                        showMessage(sheetContext, 'Nomor telepon belum valid.');
+                        return;
+                      }
+                      final dialUri = Uri(scheme: 'tel', path: dialNumber);
+                      final opened = await launchUrl(dialUri, mode: LaunchMode.externalApplication);
+                      if (!opened && sheetContext.mounted) showMessage(sheetContext, 'Tidak dapat membuka aplikasi telepon.');
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  _RecordActionTile(
+                    icon: Icons.chat_rounded, title: 'WhatsApp', subtitle: phone,
+                    onTap: () => openWhatsApp(sheetContext, phone),
+                  ),
+                ],
+                if (maps.isNotEmpty || address.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  _RecordActionTile(
+                    icon: Icons.location_on_rounded, title: 'Lokasi Google Maps',
+                    subtitle: maps.isNotEmpty ? maps : address,
+                    onTap: () => openGoogleMaps(sheetContext, maps.isNotEmpty ? maps : address),
+                  ),
+                ],
+              ],
+              if (detailEntries.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                const _RecordDetailHeading(title: 'Rincian informasi', icon: Icons.view_agenda_outlined),
+                const SizedBox(height: 9),
+                ...detailEntries.map((e) {
+                  final raw = e.value;
+                  final value = raw == null || raw.toString().trim().isEmpty
+                      ? 'Belum diisi'
+                      : raw.toString();
+                  final label = e.key.replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}').replaceAll('_', ' ').toUpperCase();
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _RecordDetailField(label: label, value: value),
+                  );
+                }),
+              ],
+              if (data['riwayatPemilik'] is List && (data['riwayatPemilik'] as List).isNotEmpty) ...[
+                const SizedBox(height: 18),
+                const _RecordDetailHeading(title: 'Riwayat kepemilikan UMKM', icon: Icons.history_rounded),
+                const SizedBox(height: 9),
+                ...((data['riwayatPemilik'] as List).whereType<Map>().map((item) => Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(13),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), border: Border.all(color: const Color(0xFFEDE1E2))),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const CircleAvatar(backgroundColor: Color(0xFFFCEAEA), child: Icon(Icons.person_outline, color: Color(0xFFC94B4B))),
+                    const SizedBox(width: 11),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text((item['nama'] ?? 'Pemilik').toString(), style: const TextStyle(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 3),
+                      Text('${item['status'] ?? 'Riwayat'} • Mulai: ${_formatHistoryDate(item['mulaiPada'])} • Selesai: ${_formatHistoryDate(item['selesaiPada'])}',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF777D86), height: 1.4)),
+                    ])),
+                  ]),
+                ))),
+              ],
+              const SizedBox(height: 14),
+              SizedBox(width: double.infinity, child: TextButton.icon(
+                onPressed: () => Navigator.pop(sheetContext),
+                icon: const Icon(Icons.close_rounded),
+                label: const Text('Tutup detail'),
+              )),
+            ]),
+          ),
+        ),
+      ]),
+    ),
+  );
+}
+
+class _RecordDetailHeading extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  const _RecordDetailHeading({required this.title, required this.icon});
+
+  @override
+  Widget build(BuildContext context) => Row(children: [
+    Container(width: 31, height: 31,
+      decoration: BoxDecoration(color: const Color(0xFFFCEAEA), borderRadius: BorderRadius.circular(10)),
+      child: Icon(icon, size: 17, color: const Color(0xFFC94B4B))),
+    const SizedBox(width: 9),
+    Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Color(0xFF252932))),
+  ]);
+}
+
+class _RecordActionTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  const _RecordActionTile({required this.icon, required this.title, required this.subtitle, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.white,
+    borderRadius: BorderRadius.circular(15),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(15),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(15), border: Border.all(color: const Color(0xFFEDE1E2))),
+        child: Row(children: [
+          Container(width: 37, height: 37,
+            decoration: BoxDecoration(color: const Color(0xFFFCEAEA), borderRadius: BorderRadius.circular(12)),
+            child: Icon(icon, color: const Color(0xFFC94B4B), size: 19)),
+          const SizedBox(width: 11),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            const SizedBox(height: 2),
+            Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Color(0xFF777D86), fontSize: 11, height: 1.3)),
+          ])),
+          const Icon(Icons.chevron_right_rounded, color: Color(0xFF9A9EA5)),
+        ]),
       ),
     ),
+  );
+}
+
+class _RecordDetailField extends StatelessWidget {
+  final String label;
+  final String value;
+  const _RecordDetailField({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(15),
+      border: Border.all(color: const Color(0xFFEDE1E2)),
+    ),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: const TextStyle(fontSize: 10, letterSpacing: .45, fontWeight: FontWeight.w800, color: Color(0xFF8A8E96))),
+      const SizedBox(height: 5),
+      SelectableText(value, style: const TextStyle(fontSize: 13, height: 1.4, fontWeight: FontWeight.w600, color: Color(0xFF252932))),
+    ]),
   );
 }
 
