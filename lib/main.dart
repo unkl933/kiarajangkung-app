@@ -5,6 +5,8 @@ import 'dart:ui' show FontFeature;
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:excel/excel.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -3171,34 +3173,358 @@ class MigrasiSatuDataPage extends StatefulWidget {
   @override State<MigrasiSatuDataPage> createState() => _MigrasiSatuDataPageState();
 }
 
+class _ImportRow {
+  final int rowNumber;
+  final Map<String, dynamic> data;
+  String status;
+  String message;
+  String? matchedId;
+  _ImportRow(this.rowNumber, this.data, this.status, this.message, {this.matchedId});
+  bool get ready => status == 'COCOK' || status == 'BARU';
+}
+
 class _MigrasiSatuDataPageState extends State<MigrasiSatuDataPage> {
-  bool busy = false;
-  Map<String, int>? report;
+  final _config = Db.firestore.collection('system_config').doc('sensus_migration');
+  final List<_ImportRow> _rows = [];
+  bool _busy = false;
+  String _fileName = '';
+  String _filter = 'SEMUA';
+  Map<String, int>? _legacyReport;
+  int get _readyCount => _rows.where((e) => e.ready).length;
+  int get _errorCount => _rows.length - _readyCount;
+
+  static const _headers = <String>[
+    'wargaId','NIK','No_KK','Nama_Lengkap','Nama_Panggilan','Jenis_Kelamin','Tempat_Lahir','Tanggal_Lahir','Agama','Status_Perkawinan','Hubungan_Dalam_KK','Pendidikan','Pekerjaan','No_HP','Kawil','RW','RT','Alamat','Status_Warga','Keterangan'
+  ];
+  static const _map = <String,String>{
+    'wargaId':'wargaId','NIK':'nik','No_KK':'noKK','Nama_Lengkap':'nama','Nama_Panggilan':'namaPanggilan','Jenis_Kelamin':'jenisKelamin','Tempat_Lahir':'tempatLahir','Tanggal_Lahir':'tanggalLahir','Agama':'agama','Status_Perkawinan':'statusPerkawinan','Hubungan_Dalam_KK':'hubunganKeluarga','Pendidikan':'pendidikan','Pekerjaan':'pekerjaan','No_HP':'telepon','Kawil':'kawil','RW':'rw','RT':'rt','Alamat':'alamat','Status_Warga':'statusWarga','Keterangan':'keterangan'
+  };
+
+  String _cellText(Data? cell) => cell?.value?.toString().trim() ?? '';
+  String _norm(String value) => value.replaceAll(RegExp(r'\D'), '');
+
+  Future<void> _pickAndCheckExcel() async {
+    if (!widget.isAdmin || _busy) return;
+    try {
+      final picked = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['xlsx'], withData: true);
+      if (picked == null || picked.files.single.bytes == null) return;
+      setState(() { _busy = true; _rows.clear(); _fileName = picked.files.single.name; });
+      final excel = Excel.decodeBytes(picked.files.single.bytes!);
+      if (excel.tables.isEmpty) throw Exception('File Excel tidak memiliki sheet.');
+      final sheet = excel.tables['DATA_WARGA'] ?? excel.tables.values.first;
+      if (sheet.rows.isEmpty) throw Exception('Sheet DATA_WARGA kosong.');
+      final headerRow = sheet.rows.first.map(_cellText).toList();
+      final indexes = <String,int>{for (var i=0;i<headerRow.length;i++) headerRow[i]:i};
+      for (final required in ['NIK','Nama_Lengkap']) { if (!indexes.containsKey(required)) throw Exception('Kolom wajib $required tidak ditemukan. Gunakan template Sensus.'); }
+      final existingSnap = await Db.module('sensus').get();
+      final byNik = <String,List<QueryDocumentSnapshot<Map<String,dynamic>>>>{};
+      for (final doc in existingSnap.docs) {
+        final nik = _norm((doc.data()['nik'] ?? '').toString());
+        if (nik.isNotEmpty) (byNik[nik] ??= []).add(doc);
+      }
+      final seenNik = <String,int>{};
+      final parsed = <_ImportRow>[];
+      for (var i=1;i<sheet.rows.length;i++) {
+        final cells = sheet.rows[i];
+        if (cells.every((c) => _cellText(c).isEmpty)) continue;
+        final rowData = <String,dynamic>{};
+        for (final h in _headers) {
+          final idx = indexes[h];
+          final value = idx == null || idx >= cells.length ? '' : _cellText(cells[idx]);
+          final key = _map[h]!;
+          if (value.isNotEmpty) rowData[key] = value;
+        }
+        final nik = _norm((rowData['nik'] ?? '').toString());
+        final name = (rowData['nama'] ?? '').toString().trim();
+        String status, message; String? matchedId;
+        if (nik.isEmpty || nik.length != 16 || name.isEmpty) {
+          status='TIDAK VALID'; message=nik.isEmpty ? 'NIK kosong; tidak dapat dicocokkan otomatis.' : (nik.length != 16 ? 'NIK harus 16 digit.' : 'Nama lengkap wajib diisi.');
+        } else if (seenNik.containsKey(nik)) {
+          status='DATA GANDA'; message='NIK juga muncul pada baris ${seenNik[nik]}. Periksa data Excel.';
+        } else {
+          seenNik[nik]=i+1;
+          final explicitId=(rowData['wargaId'] ?? '').toString();
+          final candidates = explicitId.isNotEmpty
+              ? existingSnap.docs.where((d)=>d.id==explicitId).toList()
+              : (byNik[nik] ?? []);
+          if (candidates.length > 1) { status='AMBIGU'; message='Ditemukan lebih dari satu warga dengan NIK ini.'; }
+          else if (candidates.length == 1) {
+            final existingNik = _norm((candidates.first.data()['nik'] ?? '').toString());
+            final oldName=(candidates.first.data()['nama'] ?? '').toString().trim().toLowerCase();
+            if (explicitId.isNotEmpty && existingNik != nik) {
+              status='TIDAK COCOK'; message='wargaId ditemukan, tetapi NIK pada Excel berbeda dari NIK Sensus. NIK warga tidak boleh diganti melalui impor.';
+            } else if (oldName.isNotEmpty && oldName != name.toLowerCase()) { status='PERLU VERIFIKASI'; message='NIK cocok tetapi nama berbeda: "$oldName".'; matchedId=candidates.first.id; }
+            else { status='COCOK'; message='Warga lama ditemukan; pembaruan akan mempertahankan wargaId.'; matchedId=candidates.first.id; }
+          } else if (explicitId.isNotEmpty) { status='TIDAK COCOK'; message='wargaId pada Excel tidak ditemukan. Tidak akan membuat warga baru otomatis.'; }
+          else { status='BARU'; message='NIK belum ditemukan; siap ditambahkan sebagai warga baru.'; }
+        }
+        parsed.add(_ImportRow(i+1,rowData,status,message,matchedId:matchedId));
+      }
+      if (mounted) {
+        setState(() => _rows.addAll(parsed));
+        await _config.set({
+          'lockResidentEdits': true,
+          'lockMessage': 'Pembaruan Data Sensus sedang berlangsung. Perubahan data pribadi sementara dikunci. Silakan coba kembali setelah proses selesai.',
+          'lockUpdatedAt': FieldValue.serverTimestamp(),
+          'lockUpdatedBy': Db.auth.currentUser?.uid ?? '',
+        }, SetOptions(merge: true));
+      }
+    } catch (e) {
+      if (mounted) showMessage(context, 'Gagal membaca Excel: $e');
+    } finally { if (mounted) setState(() => _busy=false); }
+  }
+
+  Future<void> _exportExcel({bool templateOnly=false, bool errorsOnly=false, String kawil='', String rw='', String rt=''}) async {
+    if (!widget.isAdmin || _busy) return;
+    setState(()=>_busy=true);
+    try {
+      final excel=Excel.createExcel();
+      final sheet=excel['DATA_WARGA'];
+      sheet.appendRow(_headers.map((e)=>TextCellValue(e)).toList());
+      if (!templateOnly && !errorsOnly) {
+        final snap=await Db.module('sensus').get();
+        for (final doc in snap.docs) {
+          final d=doc.data();
+          if(kawil.isNotEmpty && (d['kawil']??'').toString()!=kawil) continue;
+          if(rw.isNotEmpty && (d['rw']??'').toString()!=rw) continue;
+          if(rt.isNotEmpty && (d['rt']??'').toString()!=rt) continue;
+          final values=<String,dynamic>{'wargaId':doc.id,...d};
+          sheet.appendRow(_headers.map((h)=>TextCellValue((values[_map[h]] ?? '').toString())).toList());
+        }
+      }
+      if (errorsOnly) {
+        final report=excel['HASIL_PEMERIKSAAN'];
+        report.appendRow(['Baris Excel','Nama','NIK','Status','Keterangan'].map((e)=>TextCellValue(e)).toList());
+        for(final row in _rows.where((e)=>!e.ready)) {
+          report.appendRow([TextCellValue(row.rowNumber.toString()),TextCellValue((row.data['nama']??'').toString()),TextCellValue((row.data['nik']??'').toString()),TextCellValue(row.status),TextCellValue(row.message)]);
+        }
+      }
+      final ref=excel['REFERENSI'];
+      ref.appendRow([TextCellValue('Petunjuk'),TextCellValue('Isi NIK sebagai teks 16 digit. Jangan mengubah wargaId pada data hasil ekspor.')]);
+      final bytes=excel.encode();
+      if (bytes==null) throw Exception('Gagal membuat file Excel.');
+      final path=await FilePicker.platform.saveFile(fileName:templateOnly?'Template_Sensus_Warga.xlsx':(errorsOnly?'Laporan_Pemeriksaan_Sensus.xlsx':'Ekspor_Sensus_Warga.xlsx'),bytes:Uint8List.fromList(bytes));
+      if (path!=null && mounted) showMessage(context,'File Excel berhasil disiapkan.');
+    } catch(e) { if(mounted) showMessage(context,'Gagal ekspor Excel: $e'); }
+    finally { if(mounted) setState(()=>_busy=false); }
+  }
+
+  Future<void> _chooseExportScope() async {
+    final kawil=TextEditingController(); final rw=TextEditingController(); final rt=TextEditingController();
+    final result=await showDialog<List<String>?>(context:context,builder:(ctx)=>AlertDialog(
+      title:const Text('Pilih wilayah ekspor'),
+      content:Column(mainAxisSize:MainAxisSize.min,children:[
+        TextField(controller:kawil,decoration:const InputDecoration(labelText:'Kawil / Dusun (kosong = semua)')),
+        const SizedBox(height:8),TextField(controller:rw,decoration:const InputDecoration(labelText:'RW (kosong = semua)')),
+        const SizedBox(height:8),TextField(controller:rt,decoration:const InputDecoration(labelText:'RT (kosong = semua)')),
+      ]),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()=>Navigator.pop(ctx,[kawil.text.trim(),rw.text.trim(),rt.text.trim()]),child:const Text('Ekspor'))],
+    ));
+    kawil.dispose();rw.dispose();rt.dispose();
+    if(result!=null) await _exportExcel(kawil:result[0],rw:result[1],rt:result[2]);
+  }
+
+  Future<void> _resolveRow(_ImportRow row) async {
+    final nik=TextEditingController(text:(row.data['nik']??'').toString());
+    final name=TextEditingController(text:(row.data['nama']??'').toString());
+    final existing=await Db.module('sensus').get();
+    final candidates=existing.docs.where((d)=>_norm((d.data()['nik']??'').toString())==_norm(nik.text)).toList();
+    String? selected=row.matchedId;
+    if(selected==null && candidates.length==1) selected=candidates.first.id;
+    final result=await showDialog<Map<String,String>?>(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,setDialog)=>AlertDialog(
+      title:Text('Periksa baris ${row.rowNumber}'),
+      content:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+        TextField(controller:nik,keyboardType:TextInputType.number,decoration:const InputDecoration(labelText:'NIK (16 digit)')),
+        const SizedBox(height:10),TextField(controller:name,decoration:const InputDecoration(labelText:'Nama lengkap')),
+        if(candidates.isNotEmpty) ...[
+          const SizedBox(height:12),const Align(alignment:Alignment.centerLeft,child:Text('Pilih data Sensus yang dimaksud:')),
+          DropdownButtonFormField<String>(value:selected,items:candidates.map((d)=>DropdownMenuItem(value:d.id,child:Text('${d.data()['nama']??'Tanpa nama'} • ${d.id}',overflow:TextOverflow.ellipsis))).toList(),onChanged:(v)=>setDialog(()=>selected=v)),
+        ],
+        const SizedBox(height:8),const Text('Jika NIK cocok tetapi nama berbeda, pastikan identitas benar sebelum mengonfirmasi.',style:TextStyle(fontSize:12)),
+      ])),
+      actions:[TextButton(onPressed:()=>Navigator.pop(ctx),child:const Text('Batal')),FilledButton(onPressed:()=>Navigator.pop(ctx,{'nik':nik.text.trim(),'nama':name.text.trim(),'selected':selected??''}),child:const Text('Perbarui pemeriksaan'))],
+    )));
+    nik.dispose();name.dispose();
+    if(result==null)return;
+    final newNik=_norm(result['nik']??'');final newName=(result['nama']??'').trim();
+    if(newNik.length!=16||newName.isEmpty){setState(() { row.status='TIDAK VALID'; row.message='NIK harus 16 digit dan nama wajib diisi.'; row.matchedId=null; });return;}
+    final duplicate=_rows.any((r)=>!identical(r,row)&&_norm((r.data['nik']??'').toString())==newNik);
+    if(duplicate){setState(() { row.data['nik']=result['nik']; row.data['nama']=newName; row.status='DATA GANDA'; row.message='NIK sama dengan baris lain dalam file Excel.'; row.matchedId=null; });return;}
+    final chosen=result['selected']??'';
+    final matched=chosen.isNotEmpty?existing.docs.where((d)=>d.id==chosen).toList():existing.docs.where((d)=>_norm((d.data()['nik']??'').toString())==newNik).toList();
+    setState(() {
+      row.data['nik']=result['nik'];
+      row.data['nama']=newName;
+      if(matched.length>1){ row.status='AMBIGU'; row.message='Masih ada lebih dari satu data yang cocok.'; row.matchedId=null; }
+      else if(matched.length==1){ row.status='COCOK'; row.message='Dikonfirmasi Admin cocok dengan data Sensus ${matched.first.id}.'; row.matchedId=matched.first.id; }
+      else if(chosen.isNotEmpty){ row.status='TIDAK COCOK'; row.message='Data Sensus yang dipilih tidak ditemukan.'; row.matchedId=null; }
+      else if((row.data['wargaId']??'').toString().isNotEmpty){ row.status='TIDAK COCOK'; row.message='wargaId pada Excel tidak ditemukan dengan NIK tersebut. Hapus/periksa wargaId hanya jika memang membuat warga baru.'; row.matchedId=null; }
+      else { row.status='BARU'; row.message='Tidak ditemukan NIK yang sama; siap menjadi warga baru setelah verifikasi.'; row.matchedId=null; }
+    });
+  }
+
+  Future<void> _applyReady() async {
+    final ready = _rows.where((e) => e.ready).toList();
+    if (ready.isEmpty || _busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Terapkan data cocok?'),
+        content: Text('${ready.length} baris akan diterapkan ke Sensus. Data bermasalah tidak akan diubah. wargaId, akun, dan role yang sudah ada akan dipertahankan.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Terapkan')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() => _busy = true);
+    var count = 0;
+    try {
+      final censusRef = Db.module('sensus');
+      final indexRef = Db.module('sensus_nik_index');
+      for (final row in ready) {
+        final nik = _norm((row.data['nik'] ?? '').toString());
+        if (nik.length != 16) throw Exception('NIK pada baris ${row.rowNumber} tidak valid.');
+        final id = row.matchedId ?? ((row.data['wargaId'] ?? '').toString().isNotEmpty
+            ? row.data['wargaId'].toString()
+            : censusRef.doc().id);
+        final residentRef = censusRef.doc(id);
+        final newIndexRef = indexRef.doc(nik);
+        await Db.firestore.runTransaction((tx) async {
+          final residentSnap = await tx.get(residentRef);
+          final newIndexSnap = await tx.get(newIndexRef);
+          final oldData = residentSnap.data() ?? <String, dynamic>{};
+          final oldNik = _norm((oldData['nik'] ?? '').toString());
+          final oldIndexRef = oldNik.isNotEmpty && oldNik != nik ? indexRef.doc(oldNik) : null;
+          final oldIndexSnap = oldIndexRef == null ? null : await tx.get(oldIndexRef);
+          if (newIndexSnap.exists && (newIndexSnap.data()?['wargaId'] ?? '') != id) {
+            throw Exception('NIK ${row.data['nik']} sudah terdaftar pada warga lain.');
+          }
+          if (row.status == 'BARU' && residentSnap.exists) {
+            throw Exception('Data baru baris ${row.rowNumber} ternyata memiliki wargaId yang sudah ada. Periksa ulang.');
+          }
+          final safeData = Map<String, dynamic>.from(row.data)
+            ..remove('role')
+            ..remove('roles')
+            ..remove('accountUid')
+            ..remove('akunStatus')
+            ..remove('wargaId');
+          safeData['nik'] = nik;
+          safeData['wargaId'] = id;
+          safeData['updatedAt'] = FieldValue.serverTimestamp();
+          safeData['updatedBy'] = Db.auth.currentUser?.uid ?? '';
+          if (!residentSnap.exists) {
+            safeData['createdAt'] = FieldValue.serverTimestamp();
+            safeData['createdBy'] = Db.auth.currentUser?.uid ?? '';
+            safeData['roles'] = <String>['warga'];
+            safeData['akunStatus'] = 'Belum dibuat';
+          }
+          tx.set(residentRef, safeData, SetOptions(merge: true));
+          tx.set(newIndexRef, {
+            'nik': nik,
+            'wargaId': id,
+            'updatedAt': FieldValue.serverTimestamp(),
+            'updatedBy': Db.auth.currentUser?.uid ?? '',
+          }, SetOptions(merge: true));
+          if (oldIndexRef != null && oldIndexSnap != null && oldIndexSnap.exists &&
+              (oldIndexSnap.data()?['wargaId'] ?? '') == id) {
+            tx.delete(oldIndexRef);
+          }
+        });
+        count++;
+      }
+      var auditOk = true;
+      try {
+        await Db.module('riwayat_perubahan').add({
+          'jenis': 'impor_sensus',
+          'jumlah': count,
+          'file': _fileName,
+          'actorUid': Db.auth.currentUser?.uid ?? '',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) { auditOk = false; }
+      if (mounted) {
+        setState(() => _rows.removeWhere((e) => e.ready));
+        showMessage(context, auditOk
+            ? 'Berhasil menerapkan $count data cocok/baru.'
+            : 'Data diterapkan, tetapi pencatatan riwayat gagal. Periksa izin Firestore.');
+      }
+    } catch (e) {
+      if (mounted) showMessage(context, 'Penerapan dihentikan setelah $count data: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _setLock(bool value) async {
+    try {
+      await _config.set({'lockResidentEdits':value,'lockMessage':'Pembaruan Data Sensus sedang berlangsung. Perubahan data pribadi sementara dikunci. Silakan coba kembali setelah proses selesai.','lockUpdatedAt':FieldValue.serverTimestamp(),'lockUpdatedBy':Db.auth.currentUser?.uid ?? ''},SetOptions(merge:true));
+      if(mounted)showMessage(context,value?'Penguncian Informasi Diri diaktifkan.':'Penguncian Informasi Diri dinonaktifkan.');
+    } catch(e){if(mounted)showMessage(context,'Gagal mengubah penguncian: $e');}
+  }
+
+  Future<void> _runLegacyMigration() async {
+    if (!widget.isAdmin || _busy) return;
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Migrasi data modul lama?'),
+        content: const Text('Sistem akan menghubungkan data modul lama dengan Sensus jika pasangan warga ditemukan secara unik. Data ambigu atau tidak cocok dilewati dan data lama tidak dihapus.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Mulai migrasi')),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    setState(() { _busy = true; _legacyReport = null; });
+    try {
+      final result = await runLegacyWargaMigration();
+      if (mounted) setState(() => _legacyReport = result);
+      if (mounted) showMessage(context, 'Migrasi data modul lama selesai.');
+    } catch (e) {
+      if (mounted) showMessage(context, 'Migrasi data lama gagal: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Migrasi Satu Data Warga')),
-    body: ListView(padding: const EdgeInsets.all(16), children: [
-      const Card(child: Padding(padding: EdgeInsets.all(14), child: Text('Migrasi ini menghubungkan data modul lama ke Data Sensus berdasarkan nama yang cocok tepat dan hanya jika hasilnya unik. Jika ada dua warga dengan nama sama atau tidak ditemukan, data dilewati agar tidak salah menghubungkan. Data lama tidak dihapus.'))),
-      const SizedBox(height: 12),
-      FilledButton.icon(onPressed: !widget.isAdmin || busy ? null : () async {
-        final yes = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
-          title: const Text('Jalankan migrasi?'),
-          content: const Text('Sistem akan menambahkan wargaId ke data UMKM, perangkat, sarana, kesenian, kebersihan, fasilitas kesehatan, dan organisasi yang dapat dicocokkan secara unik. Data yang ambigu tidak diubah.'),
-          actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Mulai migrasi'))],
-        ));
-        if (yes != true) return;
-        setState(() { busy = true; report = null; });
-        try { final result = await runLegacyWargaMigration(); if (mounted) setState(() => report = result); }
-        catch (e) { if (mounted) showMessage(context, 'Migrasi gagal: $e'); }
-        finally { if (mounted) setState(() => busy = false); }
-      }, icon: busy ? const SizedBox(width:18,height:18,child:CircularProgressIndicator(strokeWidth:2)) : const Icon(Icons.sync), label: Text(busy ? 'Sedang memigrasikan...' : 'Jalankan migrasi data lama')),
-      if (report != null) Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Hasil migrasi', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
-        const SizedBox(height: 8), Text('Data diperiksa: ${report!['diperiksa']}'), Text('Dokumen diperbarui: ${report!['diperbarui']}'), Text('Status Aktif dilengkapi: ${report!['statusAktifDiisi']}'), Text('Indeks NIK dibuat: ${report!['indeksNIKDibuat']}'), Text('NIK ganda yang perlu diperiksa: ${report!['NIKGanda']}'), Text('Nama ambigu / tidak cocok: ${report!['ambiguAtauTidakCocok']}'),
-        const SizedBox(height: 8), const Text('Data ambigu perlu dibuka satu per satu dari modul terkait, lalu pilih warga yang benar dari Sensus.'),
+  Widget build(BuildContext context) {
+    final visible=_filter=='SEMUA'?_rows:_rows.where((r)=>r.status==_filter).toList();
+    return Scaffold(appBar:AppBar(title:const Text('Migrasi Satu Data Warga')),body:ListView(padding:const EdgeInsets.all(16),children:[
+      if (widget.isAdmin) Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Migrasi hubungan modul lama', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        const SizedBox(height: 6),
+        const Text('Menghubungkan data UMKM, perangkat, sarana, kesenian, kebersihan, fasilitas kesehatan, dan organisasi ke wargaId Sensus yang cocok.'),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(onPressed: _busy ? null : _runLegacyMigration, icon: const Icon(Icons.hub_outlined), label: const Text('Jalankan migrasi modul lama')),
+        if (_legacyReport != null) ...[
+          const SizedBox(height: 8),
+          Text('Diperiksa: ${_legacyReport!['diperiksa'] ?? 0} • Diperbarui: ${_legacyReport!['diperbarui'] ?? 0}'),
+          Text('NIK ganda: ${_legacyReport!['NIKGanda'] ?? 0} • Nama ambigu/tidak cocok: ${_legacyReport!['ambiguAtauTidakCocok'] ?? 0}'),
+        ],
       ]))),
-    ]),
-  );
+      StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:_config.snapshots(),builder:(context,snap){final locked=snap.data?.data()?['lockResidentEdits']==true;return Card(child:SwitchListTile(value:locked,onChanged:_busy?null:_setLock,title:const Text('Kunci perubahan Informasi Diri warga'),subtitle:Text(locked?'Aktif — warga hanya dapat melihat data.':'Nonaktif — warga dapat mengajukan perubahan data.'),secondary:Icon(locked?Icons.lock:Icons.lock_open,color:locked?Colors.orange:Colors.green)));}),
+      Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[const Text('Impor dan ekspor Excel (.xlsx)',style:TextStyle(fontWeight:FontWeight.bold,fontSize:16)),const SizedBox(height:6),const Text('Gunakan sheet DATA_WARGA. NIK harus 16 digit. wargaId dari hasil ekspor jangan diubah.'),const SizedBox(height:12),Wrap(spacing:8,runSpacing:8,children:[OutlinedButton.icon(onPressed:_busy?null:_pickAndCheckExcel,icon:const Icon(Icons.file_upload_outlined),label:const Text('Impor Excel')),OutlinedButton.icon(onPressed:_busy?null:()=>_exportExcel(templateOnly:true),icon:const Icon(Icons.file_download_outlined),label:const Text('Template')),OutlinedButton.icon(onPressed:_busy?null:_chooseExportScope,icon:const Icon(Icons.download),label:const Text('Ekspor Sensus'))])]))),
+      if(_busy) const LinearProgressIndicator(),
+      if(_fileName.isNotEmpty) Padding(padding:const EdgeInsets.symmetric(vertical:8),child:Text('File: $_fileName')),
+      if(_rows.isNotEmpty) ...[
+        Wrap(spacing:8,runSpacing:8,children:[_summaryChip('Total',_rows.length,Colors.blue),_summaryChip('Siap diterapkan',_readyCount,Colors.green),_summaryChip('Perlu perbaikan',_errorCount,Colors.orange)]),
+        const SizedBox(height:10),
+        DropdownButtonFormField<String>(value:_filter,decoration:const InputDecoration(labelText:'Filter hasil pemeriksaan'),items:['SEMUA','COCOK','BARU','DATA GANDA','AMBIGU','PERLU VERIFIKASI','TIDAK VALID','TIDAK COCOK'].map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),onChanged:(v)=>setState(()=>_filter=v??'SEMUA')),
+        const SizedBox(height:8),
+        ...visible.map((r)=>Card(child:ListTile(isThreeLine:true,onTap:()=>_resolveRow(r),title:Text('${r.rowNumber}. ${r.data['nama']??'(tanpa nama)'}'),subtitle:Text('NIK: ${r.data['nik']??'-'}\n${r.message}'),trailing:Column(mainAxisAlignment:MainAxisAlignment.center,children:[Chip(label:Text(r.status),backgroundColor:r.ready?Colors.green.shade100:Colors.orange.shade100),const Icon(Icons.edit_outlined,size:16)])))),
+        const SizedBox(height:10),
+        FilledButton.icon(onPressed:_busy||_readyCount==0?null:_applyReady,icon:const Icon(Icons.check_circle_outline),label:Text('Terapkan Semua Data Cocok ($_readyCount)')),
+        OutlinedButton.icon(onPressed:_busy?null:()=>_exportExcel(errorsOnly:true),icon:const Icon(Icons.report_outlined),label:const Text('Ekspor laporan kesalahan')),
+      ],
+      const SizedBox(height:12),
+      const Text('Catatan: data dengan NIK kosong, ganda, ambigu, atau nama berbeda tidak diterapkan otomatis. Penerapan mempertahankan ID dokumen warga yang sudah ada.',style:TextStyle(fontSize:12,color:Colors.black54)),
+    ]),);
+  }
+  Widget _summaryChip(String label,int value,Color color)=>Chip(avatar:CircleAvatar(backgroundColor:color,radius:5),label:Text('$label: $value'));
 }
 
 class ProfilePage extends StatefulWidget {
@@ -3313,8 +3639,17 @@ class InformasiDiriPage extends StatefulWidget {
   @override State<InformasiDiriPage> createState()=>_InformasiDiriPageState();
 }
 class _InformasiDiriPageState extends State<InformasiDiriPage>{
+  DocumentReference<Map<String, dynamic>> get _migrationConfig => Db.firestore.collection('system_config').doc('sensus_migration');
+  Future<bool> _isLocked() async {
+    final snap = await _migrationConfig.get();
+    return snap.data()?['lockResidentEdits'] == true;
+  }
   static const locked={'nama','nik','noKK','role','roles','wargaId','accountUid','createdAt','createdBy','updatedAt','updatedBy','akunStatus','kawil','rw','rt','kawilId','rwId','rtId','statusWarga','statusArsip','tanggalArsip','alamatTujuan','statusAkunSebelumArsip'};
   Future<void> edit(Map<String, dynamic> data, String wargaId) async {
+    if (await _isLocked()) {
+      if (mounted) showMessage(context, 'Pembaruan Data Sensus sedang berlangsung. Perubahan data pribadi sementara dikunci. Silakan coba kembali setelah selesai.');
+      return;
+    }
     final editable = data.entries
         .where((e) => !locked.contains(e.key) && e.value is String)
         .toList();
@@ -3388,6 +3723,9 @@ class _InformasiDiriPageState extends State<InformasiDiriPage>{
                           : () async {
                               setSheet(() => busy = true);
                               try {
+                                if (await _isLocked()) {
+                                  throw Exception('Pembaruan Data Sensus sedang berlangsung. Perubahan data pribadi sementara dikunci.');
+                                }
                                 final changes = <String, dynamic>{
                                   for (final e in controllers.entries)
                                     e.key: e.value.text.trim(),
@@ -3447,7 +3785,7 @@ class _InformasiDiriPageState extends State<InformasiDiriPage>{
     }
   }
 
-  @override Widget build(BuildContext context){final user=Db.auth.currentUser; if(user==null)return const Scaffold(body:Center(child:Text('Silakan login kembali.')));return Scaffold(appBar:AppBar(title:const Text('Informasi Diri')),body:StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.user(user.uid).snapshots(),builder:(context,userSnap){if(!userSnap.hasData)return const Center(child:CircularProgressIndicator());final profile=userSnap.data!.data()??{};final wargaId=(profile['wargaId']??'').toString();if(wargaId.isEmpty)return const Center(child:Padding(padding:EdgeInsets.all(24),child:Text('Akun ini belum terhubung dengan data Sensus. Silakan hubungi Admin/Owner.')));return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.module('sensus').doc(wargaId).snapshots(),builder:(context,snap){if(snap.hasError)return Center(child:Text('Gagal memuat Sensus: ${snap.error}'));if(!snap.hasData)return const Center(child:CircularProgressIndicator());final data=snap.data!.data();if(data==null)return const Center(child:Text('Data Sensus milik akun ini tidak ditemukan.'));final entries=data.entries.where((e)=>!{'roles','role','accountUid','wargaId','createdAt','createdBy','updatedAt','updatedBy'}.contains(e.key));final roles=(profile['roles'] is List)?(profile['roles'] as List).join(', '):(profile['role']??'warga').toString();return ListView(padding:const EdgeInsets.all(16),children:[Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFFEAF4ED),borderRadius:BorderRadius.circular(16)),child:const Text('Data ini terhubung langsung dengan Sensus Penduduk. Nama asli, NIK, Nomor KK, dan Role dikunci untuk menjaga keakuratan identitas.')),const SizedBox(height:12),Card(child:ListTile(title:const Text('Role / Hak Akses'),subtitle:Text(roles),trailing:const Icon(Icons.lock_outline))),...entries.map((e){final isLocked={'nama','nik','noKK'}.contains(e.key);final labels={'nama':'Nama Asli','nik':'NIK','noKK':'Nomor KK','jenisKelamin':'Jenis kelamin','tempatLahir':'Tempat lahir','tanggalLahir':'Tanggal lahir','telepon':'Nomor HP / WhatsApp','agama':'Agama','statusPerkawinan':'Status perkawinan','pendidikan':'Pendidikan','pekerjaan':'Pekerjaan','hubunganKeluarga':'Hubungan keluarga','kawil':'Kawil / Dusun','rw':'RW','rt':'RT','alamat':'Alamat'};return Card(child:ListTile(title:Text(labels[e.key]??e.key),subtitle:Text(e.value.toString().isEmpty?'Belum diisi':e.value.toString()),trailing:isLocked?const Icon(Icons.lock_outline,size:18):null));}),const SizedBox(height:12),FilledButton.icon(onPressed:()=>edit(data,wargaId),icon:const Icon(Icons.edit_outlined),label:const Text('Edit / Perbarui Data'))]);});}));}
+  @override Widget build(BuildContext context){final user=Db.auth.currentUser; if(user==null)return const Scaffold(body:Center(child:Text('Silakan login kembali.')));return Scaffold(appBar:AppBar(title:const Text('Informasi Diri')),body:StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.user(user.uid).snapshots(),builder:(context,userSnap){if(!userSnap.hasData)return const Center(child:CircularProgressIndicator());final profile=userSnap.data!.data()??{};final wargaId=(profile['wargaId']??'').toString();if(wargaId.isEmpty)return const Center(child:Padding(padding:EdgeInsets.all(24),child:Text('Akun ini belum terhubung dengan data Sensus. Silakan hubungi Admin/Owner.')));return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.module('sensus').doc(wargaId).snapshots(),builder:(context,snap){if(snap.hasError)return Center(child:Text('Gagal memuat Sensus: ${snap.error}'));if(!snap.hasData)return const Center(child:CircularProgressIndicator());final data=snap.data!.data();if(data==null)return const Center(child:Text('Data Sensus milik akun ini tidak ditemukan.'));final entries=data.entries.where((e)=>!{'roles','role','accountUid','wargaId','createdAt','createdBy','updatedAt','updatedBy'}.contains(e.key));final roles=(profile['roles'] is List)?(profile['roles'] as List).join(', '):(profile['role']??'warga').toString();return ListView(padding:const EdgeInsets.all(16),children:[Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFFEAF4ED),borderRadius:BorderRadius.circular(16)),child:const Text('Data ini terhubung langsung dengan Sensus Penduduk. Nama asli, NIK, Nomor KK, dan Role dikunci untuk menjaga keakuratan identitas.')),const SizedBox(height:12),Card(child:ListTile(title:const Text('Role / Hak Akses'),subtitle:Text(roles),trailing:const Icon(Icons.lock_outline))),...entries.map((e){final isLocked={'nama','nik','noKK'}.contains(e.key);final labels={'nama':'Nama Asli','nik':'NIK','noKK':'Nomor KK','jenisKelamin':'Jenis kelamin','tempatLahir':'Tempat lahir','tanggalLahir':'Tanggal lahir','telepon':'Nomor HP / WhatsApp','agama':'Agama','statusPerkawinan':'Status perkawinan','pendidikan':'Pendidikan','pekerjaan':'Pekerjaan','hubunganKeluarga':'Hubungan keluarga','kawil':'Kawil / Dusun','rw':'RW','rt':'RT','alamat':'Alamat'};return Card(child:ListTile(title:Text(labels[e.key]??e.key),subtitle:Text(e.value.toString().isEmpty?'Belum diisi':e.value.toString()),trailing:isLocked?const Icon(Icons.lock_outline,size:18):null));}),const SizedBox(height:12),StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:_migrationConfig.snapshots(),builder:(context,lockSnap){final lockedForUpdate=lockSnap.data?.data()?['lockResidentEdits']==true;return Column(children:[if(lockedForUpdate)Container(width:double.infinity,padding:const EdgeInsets.all(14),margin:const EdgeInsets.only(bottom:10),decoration:BoxDecoration(color:Colors.orange.shade50,borderRadius:BorderRadius.circular(12),border:Border.all(color:Colors.orange.shade200)),child:const Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(Icons.warning_amber_rounded,color:Colors.orange),SizedBox(width:8),Expanded(child:Text('Pembaruan Data Sensus sedang berlangsung. Untuk sementara Anda hanya dapat melihat data. Perubahan data pribadi akan dibuka kembali setelah proses selesai.'))])),SizedBox(width:double.infinity,child:FilledButton.icon(onPressed:lockedForUpdate?null:()=>edit(data,wargaId),icon:Icon(lockedForUpdate?Icons.lock_outline:Icons.edit_outlined),label:Text(lockedForUpdate?'Perubahan Data Dikunci':'Edit / Perbarui Data')))]);})]);});}));}
 }
 
 class EditProfilePage extends StatefulWidget {
