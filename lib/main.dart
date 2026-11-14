@@ -2078,13 +2078,40 @@ class ProfileKampungSectionPage extends StatelessWidget {
   }
 }
 
-class ModulePage extends StatelessWidget {
+class ModulePage extends StatefulWidget {
   final ModuleInfo module;
   final bool isAdmin;
   const ModulePage({super.key, required this.module, required this.isAdmin});
 
   @override
+  State<ModulePage> createState() => _ModulePageState();
+}
+
+class _ModulePageState extends State<ModulePage> {
+  final TextEditingController _sensusSearchController = TextEditingController();
+  String _sensusSort = 'nama_az';
+
+  @override
+  void dispose() {
+    _sensusSearchController.dispose();
+    super.dispose();
+  }
+
+  String _sensusSearchText(Map<String, dynamic> data) => [
+    data['nama'], data['nik'], data['noKK'], data['alamat'],
+    data['rt'], data['rw'], data['kawil'], data['telepon'],
+  ].where((v) => v != null).join(' ').toLowerCase();
+
+  int _dateValue(dynamic value) {
+    if (value is Timestamp) return value.millisecondsSinceEpoch;
+    if (value is DateTime) return value.millisecondsSinceEpoch;
+    return DateTime.tryParse((value ?? '').toString())?.millisecondsSinceEpoch ?? 0;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final module = widget.module;
+    final isAdmin = widget.isAdmin;
     if (module.keyName == 'profil_kampung') {
       return ProfileKampungPage(isAdmin: isAdmin);
     }
@@ -2128,7 +2155,73 @@ class ModulePage extends StatelessWidget {
               ? snapshot.data!.docs.where((d) => !isArchivedResident(d.data())).toList()
               : snapshot.data!.docs;
           if (visibleDocs.isEmpty) return const Center(child: Text('Belum ada data aktif. Data yang diarsipkan dapat dilihat di menu Arsip Warga.'));
-          return ListView.builder(
+          if (module.keyName == 'sensus') {
+            final query = _sensusSearchController.text.trim().toLowerCase();
+            visibleDocs.removeWhere((d) => query.isNotEmpty && !_sensusSearchText(d.data()).contains(query));
+            visibleDocs.sort((a, b) {
+              final ad = a.data();
+              final bd = b.data();
+              switch (_sensusSort) {
+                case 'nama_za': return (bd['nama'] ?? '').toString().toLowerCase().compareTo((ad['nama'] ?? '').toString().toLowerCase());
+                case 'nik_asc': return (ad['nik'] ?? '').toString().compareTo((bd['nik'] ?? '').toString());
+                case 'rt_asc':
+                  final c = (ad['rw'] ?? '').toString().compareTo((bd['rw'] ?? '').toString());
+                  return c != 0 ? c : (ad['rt'] ?? '').toString().compareTo((bd['rt'] ?? '').toString());
+                case 'terbaru': return _dateValue(bd['createdAt'] ?? bd['updatedAt']).compareTo(_dateValue(ad['createdAt'] ?? ad['updatedAt']));
+                case 'terlama': return _dateValue(ad['createdAt'] ?? ad['updatedAt']).compareTo(_dateValue(bd['createdAt'] ?? bd['updatedAt']));
+                default: return (ad['nama'] ?? '').toString().toLowerCase().compareTo((bd['nama'] ?? '').toString().toLowerCase());
+              }
+            });
+          }
+          return Column(children: [
+            if (module.keyName == 'sensus') Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Column(children: [
+                TextField(
+                  controller: _sensusSearchController,
+                  onChanged: (_) => setState(() {}),
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: 'Cari nama, NIK, No. KK, alamat, RT, atau RW',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _sensusSearchController.text.isEmpty ? null : IconButton(
+                      tooltip: 'Hapus pencarian', icon: const Icon(Icons.clear),
+                      onPressed: () { _sensusSearchController.clear(); setState(() {}); },
+                    ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 9),
+                Row(children: [
+                  const Icon(Icons.sort, size: 19),
+                  const SizedBox(width: 8),
+                  const Text('Urutkan:', style: TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(width: 10),
+                  Expanded(child: DropdownButtonFormField<String>(
+                    value: _sensusSort,
+                    isExpanded: true,
+                    decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 9), border: OutlineInputBorder()),
+                    items: const [
+                      DropdownMenuItem(value: 'nama_az', child: Text('Nama A – Z')),
+                      DropdownMenuItem(value: 'nama_za', child: Text('Nama Z – A')),
+                      DropdownMenuItem(value: 'nik_asc', child: Text('NIK terkecil')),
+                      DropdownMenuItem(value: 'rt_asc', child: Text('Wilayah RW / RT')),
+                      DropdownMenuItem(value: 'terbaru', child: Text('Data terbaru')),
+                      DropdownMenuItem(value: 'terlama', child: Text('Data terlama')),
+                    ],
+                    onChanged: (value) { if (value != null) setState(() => _sensusSort = value); },
+                  )),
+                ]),
+                const SizedBox(height: 8),
+                Align(alignment: Alignment.centerLeft, child: Text(
+                  '${visibleDocs.length} warga ditemukan',
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                )),
+              ]),
+            ),
+            if (visibleDocs.isEmpty) const Expanded(child: Center(child: Text('Warga tidak ditemukan. Coba kata kunci lain.')))
+            else Expanded(child: ListView.builder(
             primary: true,
             physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 90),
@@ -2207,7 +2300,8 @@ class ModulePage extends StatelessWidget {
                 ),
               );
             },
-          );
+          )),
+          ]);
         },
       ),
     );
