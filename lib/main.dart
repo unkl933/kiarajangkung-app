@@ -12,11 +12,11 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:pdf/pdf.dart' as pdf;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:pdf/pdf.dart' as pdf;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -862,6 +862,7 @@ const modules = <ModuleInfo>[
   ModuleInfo('fasilitas_kesehatan', 'Fasilitas Kesehatan', 'Klinik, puskesmas dan apotek', Icons.local_hospital_outlined),
   ModuleInfo('organisasi', 'Organisasi & Lembaga Kampung', 'Karang Taruna, PKK, Posyandu, kelompok tani dan lainnya', Icons.groups_2_outlined),
   ModuleInfo('pelayanan_masyarakat', 'Pelayanan Masyarakat', 'Surat online, pengaduan, kegiatan dan laporan RT/RW', Icons.volunteer_activism_outlined),
+  ModuleInfo('koordinasi_wilayah', 'Koordinasi Wilayah', 'Instruksi, disposisi, rapat, forum dan pengumuman pengurus', Icons.account_tree_outlined),
 ];
 
 class HomePage extends StatefulWidget {
@@ -895,7 +896,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final pages = [
       dashboard(),
-      ModulesPage(isAdmin: isAdmin),
+      ModulesPage(isAdmin: isAdmin, profile: widget.profile),
       ProfilePage(user: widget.user, profile: widget.profile, isAdmin: isAdmin),
     ];
     return Scaffold(
@@ -1926,14 +1927,21 @@ class StatCard extends StatelessWidget {
 
 class ModulesPage extends StatelessWidget {
   final bool isAdmin;
-  const ModulesPage({super.key, this.isAdmin = false});
+  final Map<String, dynamic> profile;
+  const ModulesPage({super.key, this.isAdmin = false, this.profile = const {}});
   @override
   Widget build(BuildContext context) => ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Text('Informasi & Layanan', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
-          ...modules.where((m) => isAdmin || !['arsip_warga', 'migrasi_satu_data'].contains(m.keyName)).map((m) => Card(
+          ...modules.where((m) {
+            final roles = (profile['roles'] is List) ? (profile['roles'] as List).map((e) => e.toString().toLowerCase()).toSet() : <String>{};
+            roles.add((profile['role'] ?? 'warga').toString().toLowerCase());
+            final staff = isAdmin || roles.any((r) => ['perangkat_kawil','ketua_rw','ketua_rt'].contains(r));
+            if (m.keyName == 'koordinasi_wilayah') return true;
+            return isAdmin || !['arsip_warga', 'migrasi_satu_data'].contains(m.keyName);
+          }).map((m) => Card(
                 child: ListTile(
                   leading: CircleAvatar(
                     backgroundColor: Theme.of(context).colorScheme.primaryContainer,
@@ -2419,26 +2427,15 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
       await _runBusy(() async {
         final rtId = (_profile['rtId'] ?? '').toString();
         final rwId = (_profile['rwId'] ?? '').toString();
-                await Db.module('laporan_rt_bulanan').add({
-          'bulan': now.month,
-          'tahun': now.year,
-          'periode': '${now.month.toString().padLeft(2, '0')}/${now.year}',
-          'rtId': rtId,
-          'rwId': rwId,
-          ..._areaPayload(),
-          'rtNama': (_profile['rt'] ?? '').toString(),
-          'rwNama': (_profile['rw'] ?? '').toString(),
-          'jumlahKK': int.tryParse(kk.text) ?? 0,
-          'jumlahWarga': int.tryParse(residents.text) ?? 0,
-          'pengaduanMasuk': int.tryParse(incoming.text) ?? 0,
-          'pengaduanSelesai': int.tryParse(resolved.text) ?? 0,
-          'jumlahKegiatan': int.tryParse(activities.text) ?? 0,
-          'catatan': notes.text.trim(),
-          'status': 'dikirim',
-          'dikirimOlehUid': _uid,
-          'dikirimOlehNama': _name(),
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
+        await Db.module('laporan_rt_bulanan').add({
+          'bulan': now.month, 'tahun': now.year, 'periode': '${now.month.toString().padLeft(2, '0')}/${now.year}',
+          'rtId': rtId, 'rwId': rwId, ..._areaPayload(),
+          'rtNama': (_profile['rt'] ?? '').toString(), 'rwNama': (_profile['rw'] ?? '').toString(),
+          'jumlahKK': int.tryParse(kk.text) ?? 0, 'jumlahWarga': int.tryParse(residents.text) ?? 0,
+          'pengaduanMasuk': int.tryParse(incoming.text) ?? 0, 'pengaduanSelesai': int.tryParse(resolved.text) ?? 0,
+          'jumlahKegiatan': int.tryParse(activities.text) ?? 0, 'catatan': notes.text.trim(),
+          'status': 'dikirim', 'dikirimOlehUid': _uid, 'dikirimOlehNama': _name(),
+          'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
         });
       });
     }
@@ -2691,6 +2688,491 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
 }
 
 
+// ============================================================
+// TAHAP 3 - KOORDINASI WILAYAH
+// Instruksi berjenjang, disposisi/tugas, rapat, forum, pengumuman.
+// Dokumen inti bersifat append-only; koreksi dilakukan lewat catatan tindak lanjut.
+// ============================================================
+class KoordinasiWilayahPage extends StatefulWidget {
+  final bool isAdmin;
+  const KoordinasiWilayahPage({super.key, this.isAdmin = false});
+  @override
+  State<KoordinasiWilayahPage> createState() => _KoordinasiWilayahPageState();
+}
+
+class _KoordinasiWilayahPageState extends State<KoordinasiWilayahPage> with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
+  bool _busy = false;
+  String get _uid => Db.auth.currentUser?.uid ?? '';
+  Map<String, dynamic> _profile = {};
+  Set<String> get _roles {
+    final r = (_profile['roles'] is List) ? (_profile['roles'] as List).map((e) => e.toString().toLowerCase()).toSet() : <String>{};
+    r.add((_profile['role'] ?? 'warga').toString().toLowerCase());
+    return r;
+  }
+  bool get _admin => widget.isAdmin || _roles.contains('owner') || _roles.contains('admin');
+  bool get _kawil => _roles.contains('perangkat_kawil');
+  bool get _rw => _roles.contains('ketua_rw');
+  bool get _rt => _roles.contains('ketua_rt');
+  bool get _staff => _admin || _kawil || _rw || _rt;
+  String get _name => (_profile['nama'] ?? _profile['name'] ?? 'Petugas').toString();
+  String get _level => _admin ? 'admin' : _kawil ? 'kawil' : _rw ? 'rw' : _rt ? 'rt' : 'warga';
+  String get _areaField => _kawil ? 'kawilId' : _rw ? 'rwId' : 'rtId';
+  String get _areaId => (_profile[_areaField] ?? '').toString();
+  Map<String, dynamic> get _area => {
+    'kawilId': (_profile['kawilId'] ?? '').toString(),
+    'kawilNama': (_profile['kawil'] ?? _profile['kawilNama'] ?? '').toString(),
+    'rwId': (_profile['rwId'] ?? '').toString(),
+    'rwNama': (_profile['rw'] ?? _profile['rwNama'] ?? '').toString(),
+    'rtId': (_profile['rtId'] ?? '').toString(),
+    'rtNama': (_profile['rt'] ?? _profile['rtNama'] ?? '').toString(),
+  };
+
+  @override
+  void initState() { super.initState(); _tabs = TabController(length: 6, vsync: this); }
+  @override
+  void dispose() { _tabs.dispose(); super.dispose(); }
+
+  Query<Map<String, dynamic>> _scoped(String collection) {
+    final q = Db.module(collection);
+    if (_admin) return q;
+    if (_areaId.isEmpty) return q.where('dibuatOlehUid', isEqualTo: _uid);
+    return q.where(_areaField, isEqualTo: _areaId);
+  }
+
+  Future<void> _save(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try { await action(); if (mounted) showMessage(context, 'Berhasil disimpan.'); }
+    catch (e) { if (mounted) showMessage(context, 'Gagal: $e'); }
+    finally { if (mounted) setState(() => _busy = false); }
+  }
+
+  Future<void> _queuePush({required String targetLevel, required Map<String, dynamic> area, required String title, required String message}) async {
+    try {
+      await Db.module('notifikasi').add({
+        ...area, 'jenis': 'agenda', 'targetLevel': targetLevel,
+        'judul': title, 'pesan': message, 'status': 'menunggu',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // Dokumen utama tetap tersimpan walau antrean push belum tersedia.
+    }
+  }
+
+  Future<Map<String, dynamic>?> _selectTarget({required String level}) async {
+    final collection = level == 'rw' ? 'wilayah_rw' : 'wilayah_rt';
+    final snap = await Db.module(collection).get();
+    var docs = snap.docs.where((d) => d.data().containsKey('nama') && d.data().containsKey('aktif') ? d.data()['aktif'] == true : true).toList();
+    if (level == 'rw' && !_admin) docs = docs.where((d) => d.data()['kawilId'] == (_profile['kawilId'] ?? '')).toList();
+    if (level == 'rt' && !_admin) docs = docs.where((d) => d.data()['rwId'] == (_profile['rwId'] ?? '')).toList();
+    if (docs.isEmpty || !mounted) { if (mounted) showMessage(context, 'Data wilayah tujuan belum tersedia atau di luar kewenangan Anda.'); return null; }
+    String selected = docs.first.id;
+    return showDialog<Map<String, dynamic>>(context: context, builder: (ctx) => StatefulBuilder(builder: (ctx, setDialog) => AlertDialog(
+      title: Text('Pilih ${level.toUpperCase()} tujuan'),
+      content: DropdownButtonFormField<String>(value: selected, isExpanded: true,
+        items: docs.map((d) => DropdownMenuItem(value: d.id, child: Text((d.data()['nama'] ?? d.id).toString()))).toList(),
+        onChanged: (v) { if (v != null) setDialog(() => selected = v); }),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+        FilledButton(onPressed: () { final d = docs.firstWhere((x) => x.id == selected); Navigator.pop(ctx, {'id': d.id, ...d.data()}); }, child: const Text('Pilih'))],
+    )));
+  }
+
+  Future<String?> _chooseTargetLevel() async {
+    if (_kawil && _rw) {
+      return showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('Pilih jalur koordinasi'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(leading: const Icon(Icons.account_tree_outlined), title: const Text('Kawil → RW'), onTap: () => Navigator.pop(ctx, 'rw')),
+          ListTile(leading: const Icon(Icons.home_work_outlined), title: const Text('RW → RT'), onTap: () => Navigator.pop(ctx, 'rt')),
+        ]),
+      ));
+    }
+    return _kawil ? 'rw' : 'rt';
+  }
+
+  Future<void> _createInstruction() async {
+    if (!_admin && !_kawil && !_rw) { showMessage(context, 'Ketua RT tidak dapat membuat instruksi resmi. Sampaikan melalui Ketua RW.'); return; }
+    final targetLevel = await _chooseTargetLevel();
+    if (targetLevel == null) return;
+    final target = await _selectTarget(level: targetLevel);
+    if (target == null || !mounted) return;
+    final form = GlobalKey<FormState>();
+    final title = TextEditingController(); final body = TextEditingController(); final deadline = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Buat Instruksi Wilayah'),
+      content: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Tujuan: ${targetLevel.toUpperCase()} ${(target['nama'] ?? '').toString()}'),
+        TextFormField(controller: title, decoration: const InputDecoration(labelText: 'Judul instruksi *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Judul wajib diisi' : null),
+        TextFormField(controller: body, minLines: 3, maxLines: 5, decoration: const InputDecoration(labelText: 'Isi instruksi *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Isi wajib diisi' : null),
+        TextFormField(controller: deadline, decoration: const InputDecoration(labelText: 'Batas waktu (opsional, DD-MM-YYYY)')),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+        FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(ctx, true); }, child: const Text('Kirim instruksi'))],
+    ));
+    if (ok == true) await _save(() async {
+      final now = FieldValue.serverTimestamp();
+      final targetArea = <String, dynamic>{..._area};
+      if (targetLevel == 'rw') {
+        targetArea['rwId'] = target['id']; targetArea['rwNama'] = target['nama'] ?? '';
+        targetArea['rtId'] = ''; targetArea['rtNama'] = '';
+      } else {
+        targetArea['rwId'] = (_profile['rwId'] ?? ''); targetArea['rwNama'] = (_profile['rw'] ?? '');
+        targetArea['rtId'] = target['id']; targetArea['rtNama'] = target['nama'] ?? '';
+      }
+      await Db.module('koordinasi_instruksi').add({
+        ...targetArea, 'targetLevel': targetLevel, 'targetId': target['id'], 'targetNama': target['nama'] ?? '',
+        'judul': title.text.trim(), 'isi': body.text.trim(), 'batasWaktu': deadline.text.trim(),
+        'status': 'terkirim', 'dibuatOlehUid': _uid, 'dibuatOlehNama': _name, 'dibuatOlehLevel': _level,
+        'createdAt': now, 'updatedAt': now,
+      });
+      await _queuePush(targetLevel: targetLevel, area: targetArea, title: 'Instruksi wilayah: ${title.text.trim()}', message: body.text.trim());
+    });
+    title.dispose(); body.dispose(); deadline.dispose();
+  }
+
+  Future<void> _createTask() async {
+    if (!_admin && !_kawil && !_rw) { showMessage(context, 'Ketua RT tidak dapat mendisposisikan tugas kepada RT lain.'); return; }
+    final targetLevel = await _chooseTargetLevel();
+    if (targetLevel == null) return;
+    final target = await _selectTarget(level: targetLevel);
+    if (target == null || !mounted) return;
+    final form = GlobalKey<FormState>(); final title = TextEditingController(); final detail = TextEditingController(); final deadline = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Buat Disposisi / Tugas'),
+      content: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Ditugaskan kepada ${targetLevel.toUpperCase()} ${(target['nama'] ?? '').toString()}'),
+        TextFormField(controller: title, decoration: const InputDecoration(labelText: 'Nama tugas *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Nama tugas wajib diisi' : null),
+        TextFormField(controller: detail, minLines: 3, maxLines: 5, decoration: const InputDecoration(labelText: 'Rincian tugas *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Rincian wajib diisi' : null),
+        TextFormField(controller: deadline, decoration: const InputDecoration(labelText: 'Tenggat (DD-MM-YYYY)')),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+        FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(ctx, true); }, child: const Text('Kirim tugas'))],
+    ));
+    if (ok == true) await _save(() async {
+      final area = <String, dynamic>{..._area};
+      if (targetLevel == 'rw') { area['rwId'] = target['id']; area['rwNama'] = target['nama'] ?? ''; area['rtId'] = ''; area['rtNama'] = ''; }
+      else { area['rtId'] = target['id']; area['rtNama'] = target['nama'] ?? ''; }
+      final now = FieldValue.serverTimestamp();
+      await Db.module('koordinasi_tugas').add({
+        ...area, 'targetLevel': targetLevel, 'targetId': target['id'], 'targetNama': target['nama'] ?? '',
+        'judul': title.text.trim(), 'uraian': detail.text.trim(), 'tenggat': deadline.text.trim(), 'status': 'ditugaskan',
+        'dibuatOlehUid': _uid, 'dibuatOlehNama': _name, 'dibuatOlehLevel': _level, 'createdAt': now, 'updatedAt': now,
+      });
+      await _queuePush(targetLevel: targetLevel, area: area, title: 'Tugas baru: ${title.text.trim()}', message: detail.text.trim());
+    });
+    title.dispose(); detail.dispose(); deadline.dispose();
+  }
+
+  bool _isTaskRecipient(Map<String, dynamic> d) {
+    if (_admin) return true;
+    if (d['targetLevel'] == 'rw') return _rw && d['targetId'] == (_profile['rwId'] ?? '');
+    if (d['targetLevel'] == 'rt') return _rt && d['targetId'] == (_profile['rtId'] ?? '');
+    return false;
+  }
+
+  Future<void> _addProgress(String taskId, Map<String, dynamic> task) async {
+    if (!_isTaskRecipient(task)) { showMessage(context, 'Hanya wilayah penerima tugas yang dapat mengirim progres.'); return; }
+    final note = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Kirim Progres Tugas'),
+      content: TextField(controller: note, minLines: 3, maxLines: 5, decoration: const InputDecoration(labelText: 'Uraian progres / hasil pekerjaan')),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, note.text.trim().isNotEmpty), child: const Text('Kirim progres'))],
+    ));
+    if (ok == true) await _save(() async {
+      await Db.module('koordinasi_progres').add({
+        'tugasId': taskId, 'kawilId': task['kawilId'] ?? '', 'rwId': task['rwId'] ?? '', 'rtId': task['rtId'] ?? '',
+        'catatan': note.text.trim(), 'statusProgres': 'dilaporkan', 'dibuatOlehUid': _uid, 'dibuatOlehNama': _name,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    });
+    note.dispose();
+  }
+
+  Future<void> _createMeeting() async {
+    final form = GlobalKey<FormState>(); final title = TextEditingController(); final date = TextEditingController();
+    final time = TextEditingController(); final place = TextEditingController(); final agenda = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Jadwalkan Rapat / Musyawarah'),
+      content: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextFormField(controller: title, decoration: const InputDecoration(labelText: 'Nama rapat *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Wajib diisi' : null),
+        TextFormField(controller: date, decoration: const InputDecoration(labelText: 'Tanggal *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Wajib diisi' : null),
+        TextFormField(controller: time, decoration: const InputDecoration(labelText: 'Waktu')),
+        TextFormField(controller: place, decoration: const InputDecoration(labelText: 'Tempat')),
+        TextFormField(controller: agenda, minLines: 2, maxLines: 4, decoration: const InputDecoration(labelText: 'Agenda / pokok bahasan')),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+        FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(ctx, true); }, child: const Text('Simpan rapat'))],
+    ));
+    if (ok == true) await _save(() async {
+      final meetingArea = <String, dynamic>{..._area};
+      await Db.module('koordinasi_rapat').add({
+        ...meetingArea, 'targetLevel': _level, 'judul': title.text.trim(), 'tanggal': date.text.trim(), 'waktu': time.text.trim(),
+        'tempat': place.text.trim(), 'agenda': agenda.text.trim(), 'status': 'terjadwal',
+        'dibuatOlehUid': _uid, 'dibuatOlehNama': _name, 'dibuatOlehLevel': _level,
+        'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
+      });
+      await _queuePush(targetLevel: _level == 'admin' ? 'kampung' : _level, area: meetingArea, title: 'Undangan rapat: ${title.text.trim()}', message: '${date.text.trim()} ${time.text.trim()} • ${place.text.trim()}');
+    });
+    title.dispose(); date.dispose(); time.dispose(); place.dispose(); agenda.dispose();
+  }
+
+  Future<void> _attendance(String meetingId, Map<String, dynamic> meeting) async {
+    await _save(() async {
+      await Db.module('koordinasi_kehadiran').add({
+        'rapatId': meetingId, 'kawilId': meeting['kawilId'] ?? '', 'rwId': meeting['rwId'] ?? '', 'rtId': meeting['rtId'] ?? '',
+        'uid': _uid, 'nama': _name, 'status': 'hadir', 'createdAt': FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
+  Future<void> _addMinutes(String meetingId, Map<String, dynamic> meeting) async {
+    final c = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Catat Notulen / Hasil Rapat'),
+      content: TextField(controller: c, minLines: 4, maxLines: 7, decoration: const InputDecoration(labelText: 'Keputusan, kesepakatan, dan tindak lanjut')),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim().isNotEmpty), child: const Text('Simpan notulen'))],
+    ));
+    if (ok == true) await _save(() async {
+      await Db.module('koordinasi_notulen').add({
+        'rapatId': meetingId, 'kawilId': meeting['kawilId'] ?? '', 'rwId': meeting['rwId'] ?? '', 'rtId': meeting['rtId'] ?? '',
+        'isi': c.text.trim(), 'dibuatOlehUid': _uid, 'dibuatOlehNama': _name, 'createdAt': FieldValue.serverTimestamp(),
+      });
+    });
+    c.dispose();
+  }
+
+  Widget _publicAnnouncements() => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    stream: Db.module('koordinasi_pengumuman').where('publik', isEqualTo: true).snapshots(),
+    builder: (context, snap) {
+      if (snap.hasError) return Center(child: Text('Gagal memuat pengumuman: ${snap.error}'));
+      if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+      final docs = snap.data!.docs.toList()..sort((a,b) => ((b.data()['createdAt'] is Timestamp) ? (b.data()['createdAt'] as Timestamp).millisecondsSinceEpoch : 0).compareTo((a.data()['createdAt'] is Timestamp) ? (a.data()['createdAt'] as Timestamp).millisecondsSinceEpoch : 0));
+      if (docs.isEmpty) return _empty('Belum ada pengumuman wilayah yang diterbitkan.');
+      return ListView(padding: const EdgeInsets.all(12), children: docs.map((d) => _announcementTile(d.id,d.data())).toList());
+    });
+
+  Future<void> _postForum() async {
+    final c = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Pesan Forum Koordinasi'),
+      content: TextField(controller: c, minLines: 3, maxLines: 5, decoration: const InputDecoration(labelText: 'Tulis pesan untuk pengurus wilayah')),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim().isNotEmpty), child: const Text('Kirim'))],
+    ));
+    if (ok == true) await _save(() async {
+      await Db.module('koordinasi_forum').add({..._area, 'pesan': c.text.trim(), 'dibuatOlehUid': _uid,
+        'dibuatOlehNama': _name, 'dibuatOlehLevel': _level, 'createdAt': FieldValue.serverTimestamp()});
+    });
+    c.dispose();
+  }
+
+  Future<void> _createAnnouncement() async {
+    final form = GlobalKey<FormState>(); final title = TextEditingController(); final body = TextEditingController();
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Buat Pengumuman Wilayah'),
+      content: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextFormField(controller: title, decoration: const InputDecoration(labelText: 'Judul *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Wajib diisi' : null),
+        TextFormField(controller: body, minLines: 3, maxLines: 5, decoration: const InputDecoration(labelText: 'Isi pengumuman *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Wajib diisi' : null),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+        FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(ctx, true); }, child: const Text('Terbitkan'))],
+    ));
+    if (ok == true) await _save(() async {
+      final announcementArea = <String, dynamic>{..._area};
+      await Db.module('koordinasi_pengumuman').add({...announcementArea, 'targetLevel': _level, 'publik': true, 'judul': title.text.trim(), 'isi': body.text.trim(),
+        'status': 'terbit', 'dibuatOlehUid': _uid, 'dibuatOlehNama': _name, 'dibuatOlehLevel': _level,
+        'createdAt': FieldValue.serverTimestamp()});
+      await _queuePush(targetLevel: _level == 'admin' ? 'kampung' : _level, area: announcementArea, title: title.text.trim(), message: body.text.trim());
+    });
+    title.dispose(); body.dispose();
+  }
+
+  Future<void> _appendChange(String jenisDokumen, String id, Map<String, dynamic> original, String aksi) async {
+    final reason = TextEditingController();
+    final replacement = TextEditingController();
+    final form = GlobalKey<FormState>();
+    final ok = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: Text(aksi == 'pembatalan' ? 'Batalkan ${jenisDokumen == 'instruksi' ? 'Instruksi' : 'Tugas'}' : 'Catat Koreksi'),
+      content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextFormField(controller: reason, minLines: 2, maxLines: 4, decoration: const InputDecoration(labelText: 'Alasan *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Alasan wajib diisi' : null),
+        if (aksi == 'koreksi') TextFormField(controller: replacement, minLines: 3, maxLines: 5, decoration: const InputDecoration(labelText: 'Isi / arahan pengganti *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Isi koreksi wajib diisi' : null),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+        FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(ctx, true); }, child: const Text('Simpan riwayat'))],
+    ));
+    if (ok == true) await _save(() async {
+      await Db.module('koordinasi_perubahan').add({
+        'jenisDokumen': jenisDokumen, 'referensiId': id, 'aksi': aksi,
+        'alasan': reason.text.trim(), 'isiPerubahan': replacement.text.trim(),
+        'kawilId': original['kawilId'] ?? '', 'rwId': original['rwId'] ?? '', 'rtId': original['rtId'] ?? '',
+        'dibuatOlehUid': _uid, 'dibuatOlehNama': _name, 'createdAt': FieldValue.serverTimestamp(),
+      });
+    });
+    reason.dispose(); replacement.dispose();
+  }
+
+  Widget _changeHistory(String id) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    stream: _scoped('koordinasi_perubahan').where('referensiId', isEqualTo: id).snapshots(),
+    builder: (context, snap) {
+      if (!snap.hasData || snap.data!.docs.isEmpty) return const SizedBox.shrink();
+      return Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Riwayat koreksi / pembatalan', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+        ...snap.data!.docs.map((x) { final v = x.data(); return Padding(padding: const EdgeInsets.only(top: 5), child: Text('• ${(v['aksi'] ?? '').toString().toUpperCase()} oleh ${(v['dibuatOlehNama'] ?? '-')}: ${(v['alasan'] ?? '')}${(v['isiPerubahan'] ?? '').toString().isNotEmpty ? '\n  Koreksi: ${v['isiPerubahan']}' : ''}')); }),
+      ]));
+    });
+
+  Future<void> _ackInstruction(String id, Map<String, dynamic> d) async {
+    await _save(() async {
+      await Db.module('koordinasi_konfirmasi').add({
+        'instruksiId': id, 'kawilId': d['kawilId'] ?? '', 'rwId': d['rwId'] ?? '', 'rtId': d['rtId'] ?? '',
+        'uid': _uid, 'nama': _name, 'status': 'dibaca', 'createdAt': FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
+  Query<Map<String, dynamic>> _forumQuery() {
+    if (_admin) return Db.module('koordinasi_forum');
+    if (_rt && (_profile['rwId'] ?? '').toString().isNotEmpty) return Db.module('koordinasi_forum').where('rwId', isEqualTo: _profile['rwId']);
+    return _scoped('koordinasi_forum');
+  }
+
+  Widget _empty(String text) => Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(text, textAlign: TextAlign.center)));
+  Widget _streamListQuery(Query<Map<String, dynamic>> query, String collection, Widget Function(String, Map<String, dynamic>) tile, String empty) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    stream: query.snapshots(),
+    builder: (context, snap) {
+      if (snap.hasError) return Center(child: Padding(padding: const EdgeInsets.all(18), child: Text('Gagal memuat $collection: ${snap.error}')));
+      if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+      final docs = snap.data!.docs.toList()..sort((a,b) => ((b.data()['createdAt'] is Timestamp) ? (b.data()['createdAt'] as Timestamp).millisecondsSinceEpoch : 0).compareTo((a.data()['createdAt'] is Timestamp) ? (a.data()['createdAt'] as Timestamp).millisecondsSinceEpoch : 0));
+      if (docs.isEmpty) return _empty(empty);
+      return ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 90), children: docs.map((d) => tile(d.id, d.data())).toList());
+    });
+
+  Widget _streamList(String collection, Widget Function(String, Map<String, dynamic>) tile, String empty) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    stream: _scoped(collection).snapshots(),
+    builder: (context, snap) {
+      if (snap.hasError) return Center(child: Padding(padding: const EdgeInsets.all(18), child: Text('Gagal memuat $collection: ${snap.error}')));
+      if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+      final docs = snap.data!.docs.toList()..sort((a,b) => ((b.data()['createdAt'] is Timestamp) ? (b.data()['createdAt'] as Timestamp).millisecondsSinceEpoch : 0).compareTo((a.data()['createdAt'] is Timestamp) ? (a.data()['createdAt'] as Timestamp).millisecondsSinceEpoch : 0));
+      if (docs.isEmpty) return _empty(empty);
+      return ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 90), children: docs.map((d) => tile(d.id, d.data())).toList());
+    });
+
+  Widget _instructionTile(String id, Map<String, dynamic> d) => Card(child: Column(children: [
+    ListTile(leading: const CircleAvatar(child: Icon(Icons.campaign_outlined)),
+      title: Text((d['judul'] ?? 'Instruksi').toString(), style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: Text('${d['isi'] ?? ''}\nDari: ${d['dibuatOlehNama'] ?? '-'} • Tujuan: ${d['targetLevel'] ?? ''} ${d['targetNama'] ?? ''}\nBatas waktu: ${d['batasWaktu'] ?? '-'}'),
+      isThreeLine: true, trailing: PopupMenuButton<String>(onSelected: (v) {
+        if (v == 'baca') _ackInstruction(id,d);
+        if (v == 'koreksi') _appendChange('instruksi',id,d,'koreksi');
+        if (v == 'batal') _appendChange('instruksi',id,d,'pembatalan');
+      }, itemBuilder: (_) => [
+        const PopupMenuItem(value: 'baca', child: Text('Konfirmasi dibaca')),
+        if (_admin || d['dibuatOlehUid'] == _uid) ...[
+          const PopupMenuItem(value: 'koreksi', child: Text('Catat koreksi')),
+          const PopupMenuItem(value: 'batal', child: Text('Catat pembatalan')),
+        ],
+      ])),
+    _changeHistory(id),
+  ]));
+  Widget _taskTile(String id, Map<String, dynamic> d) => Card(child: Column(children: [
+    ListTile(leading: const CircleAvatar(child: Icon(Icons.assignment_outlined)),
+      title: Text((d['judul'] ?? 'Tugas').toString(), style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: Text('${d['uraian'] ?? ''}\nPenanggung jawab: ${d['targetLevel'] ?? ''} ${d['targetNama'] ?? ''}\nTenggat: ${d['tenggat'] ?? '-'}'),
+      isThreeLine: true, trailing: PopupMenuButton<String>(onSelected: (v) {
+        if (v == 'progres') _addProgress(id,d);
+        if (v == 'koreksi') _appendChange('tugas',id,d,'koreksi');
+        if (v == 'batal') _appendChange('tugas',id,d,'pembatalan');
+      }, itemBuilder: (_) => [
+        if (_isTaskRecipient(d)) const PopupMenuItem(value: 'progres', child: Text('Kirim progres')),
+        if (_admin || d['dibuatOlehUid'] == _uid) ...[
+          const PopupMenuItem(value: 'koreksi', child: Text('Catat koreksi')),
+          const PopupMenuItem(value: 'batal', child: Text('Catat pembatalan')),
+        ],
+      ])),
+    _changeHistory(id),
+    StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(stream: _scoped('koordinasi_progres').where('tugasId', isEqualTo: id).snapshots(), builder: (context, snap) {
+      if (!snap.hasData || snap.data!.docs.isEmpty) return const SizedBox.shrink();
+      return Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Riwayat progres', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+        ...snap.data!.docs.map((p) => Padding(padding: const EdgeInsets.only(top: 5), child: Text('• ${(p.data()['dibuatOlehNama'] ?? 'Petugas')}: ${(p.data()['catatan'] ?? '').toString()}'))),
+      ]));
+    }),
+  ]));
+  Widget _meetingTile(String id, Map<String, dynamic> d) => Card(child: Column(children: [
+    ListTile(leading: const CircleAvatar(child: Icon(Icons.groups_outlined)), title: Text((d['judul'] ?? 'Rapat').toString(), style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: Text('${d['tanggal'] ?? ''} • ${d['waktu'] ?? ''}\nTempat: ${d['tempat'] ?? '-'}\nAgenda: ${d['agenda'] ?? '-'}'), isThreeLine: true,
+      trailing: PopupMenuButton<String>(onSelected: (v) { if (v == 'hadir') _attendance(id,d); if (v == 'notulen') _addMinutes(id,d); }, itemBuilder: (_) => [
+        const PopupMenuItem(value: 'hadir', child: Text('Konfirmasi hadir')),
+        const PopupMenuItem(value: 'notulen', child: Text('Tambah notulen')),
+      ])),
+    StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(stream: _scoped('koordinasi_notulen').where('rapatId', isEqualTo: id).snapshots(), builder: (context, snap) {
+      if (!snap.hasData || snap.data!.docs.isEmpty) return const SizedBox.shrink();
+      return Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Notulen / keputusan', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+        ...snap.data!.docs.map((n) => Padding(padding: const EdgeInsets.only(top: 5), child: Text('• ${(n.data()['dibuatOlehNama'] ?? 'Petugas')}: ${(n.data()['isi'] ?? '').toString()}'))),
+      ]));
+    }),
+  ]));
+  Widget _forumTile(String id, Map<String, dynamic> d) => Card(child: ListTile(
+    leading: const CircleAvatar(child: Icon(Icons.forum_outlined)), title: Text((d['dibuatOlehNama'] ?? 'Pengurus').toString(), style: const TextStyle(fontWeight: FontWeight.w700)),
+    subtitle: Text((d['pesan'] ?? '').toString())));
+  Widget _announcementTile(String id, Map<String, dynamic> d) => Card(child: ListTile(
+    leading: const CircleAvatar(child: Icon(Icons.notifications_active_outlined)), title: Text((d['judul'] ?? 'Pengumuman').toString(), style: const TextStyle(fontWeight: FontWeight.w700)),
+    subtitle: Text('${d['isi'] ?? ''}\nDiterbitkan oleh: ${d['dibuatOlehNama'] ?? '-'}')));
+
+  Widget _recap() => ListView(padding: const EdgeInsets.all(14), children: [
+    Text('Ringkasan koordinasi wilayah', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+    const SizedBox(height: 8),
+    _recapCount('Instruksi terkirim', 'koordinasi_instruksi', Icons.campaign_outlined),
+    _recapCount('Disposisi / tugas', 'koordinasi_tugas', Icons.assignment_outlined),
+    _recapCount('Rapat / musyawarah', 'koordinasi_rapat', Icons.groups_outlined),
+    _recapCount('Pesan forum', 'koordinasi_forum', Icons.forum_outlined),
+    _recapCount('Pengumuman', 'koordinasi_pengumuman', Icons.notifications_outlined),
+    const SizedBox(height: 10), const Text('Dokumen instruksi dan tugas tidak menyediakan tombol hapus. Setiap progres disimpan sebagai catatan terpisah agar riwayat awal tetap utuh.'),
+  ]);
+  Widget _recapCount(String label, String collection, IconData icon) => Card(child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    stream: _scoped(collection).snapshots(), builder: (context, snap) => ListTile(leading: Icon(icon), title: Text(label), trailing: Text(snap.hasData ? '${snap.data!.size}' : '…', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)))));
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+    stream: Db.user(_uid).snapshots(), builder: (context, profileSnap) {
+      if (profileSnap.hasError) return Scaffold(appBar: AppBar(title: const Text('Koordinasi Wilayah')), body: Center(child: Text('Gagal membaca profil: ${profileSnap.error}')));
+      if (!profileSnap.hasData) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      _profile = profileSnap.data!.data() ?? {};
+      if (!_staff) return Scaffold(appBar: AppBar(title: const Text('Pengumuman Wilayah')), body: _publicAnnouncements());
+      return Scaffold(
+        appBar: AppBar(title: const Text('Koordinasi Wilayah'), bottom: TabBar(controller: _tabs, isScrollable: true, tabs: const [
+          Tab(icon: Icon(Icons.campaign_outlined), text: 'Instruksi'), Tab(icon: Icon(Icons.assignment_outlined), text: 'Tugas'),
+          Tab(icon: Icon(Icons.groups_outlined), text: 'Rapat'), Tab(icon: Icon(Icons.forum_outlined), text: 'Forum'),
+          Tab(icon: Icon(Icons.notifications_outlined), text: 'Pengumuman'), Tab(icon: Icon(Icons.analytics_outlined), text: 'Rekap'),
+        ])),
+        body: Stack(children: [TabBarView(controller: _tabs, children: [
+          _streamList('koordinasi_instruksi', _instructionTile, 'Belum ada instruksi untuk wilayah ini.'),
+          _streamList('koordinasi_tugas', _taskTile, 'Belum ada tugas atau disposisi.'),
+          _streamList('koordinasi_rapat', _meetingTile, 'Belum ada jadwal rapat.'),
+          _streamListQuery(_forumQuery(), 'koordinasi_forum', _forumTile, 'Belum ada pesan forum.'),
+          _streamList('koordinasi_pengumuman', _announcementTile, 'Belum ada pengumuman wilayah.'),
+          _recap(),
+        ]), if (_busy) const Positioned(top: 0,left: 0,right: 0,child: LinearProgressIndicator())]),
+        floatingActionButton: _tabs.index == 0 && (_admin || _kawil || _rw)
+          ? FloatingActionButton.extended(onPressed: _busy ? null : _createInstruction, icon: const Icon(Icons.add), label: const Text('Buat Instruksi'))
+          : _tabs.index == 1 && (_admin || _kawil || _rw)
+            ? FloatingActionButton.extended(onPressed: _busy ? null : _createTask, icon: const Icon(Icons.add_task), label: const Text('Buat Tugas'))
+            : _tabs.index == 2
+              ? FloatingActionButton.extended(onPressed: _busy ? null : _createMeeting, icon: const Icon(Icons.event), label: const Text('Jadwalkan Rapat'))
+              : _tabs.index == 3
+                ? FloatingActionButton.extended(onPressed: _busy ? null : _postForum, icon: const Icon(Icons.send), label: const Text('Tulis Pesan'))
+                : _tabs.index == 4
+                  ? FloatingActionButton.extended(onPressed: _busy ? null : _createAnnouncement, icon: const Icon(Icons.add), label: const Text('Buat Pengumuman'))
+                  : null,
+      );
+    });
+}
+
+
 class ModulePage extends StatefulWidget {
   final ModuleInfo module;
   final bool isAdmin;
@@ -2733,6 +3215,9 @@ class _ModulePageState extends State<ModulePage> {
     }
     if (module.keyName == 'pelayanan_masyarakat') {
       return PelayananMasyarakatPage(isAdmin: isAdmin);
+    }
+    if (module.keyName == 'koordinasi_wilayah') {
+      return KoordinasiWilayahPage(isAdmin: isAdmin);
     }
     if (module.keyName == 'informasi_diri') {
       return const InformasiDiriPage();

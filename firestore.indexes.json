@@ -1,0 +1,14 @@
+{
+  "indexes": [
+    {"collectionGroup":"koordinasi_progres","queryScope":"COLLECTION","fields":[{"fieldPath":"kawilId","order":"ASCENDING"},{"fieldPath":"tugasId","order":"ASCENDING"}]},
+    {"collectionGroup":"koordinasi_progres","queryScope":"COLLECTION","fields":[{"fieldPath":"rwId","order":"ASCENDING"},{"fieldPath":"tugasId","order":"ASCENDING"}]},
+    {"collectionGroup":"koordinasi_progres","queryScope":"COLLECTION","fields":[{"fieldPath":"rtId","order":"ASCENDING"},{"fieldPath":"tugasId","order":"ASCENDING"}]},
+    {"collectionGroup":"koordinasi_notulen","queryScope":"COLLECTION","fields":[{"fieldPath":"kawilId","order":"ASCENDING"},{"fieldPath":"rapatId","order":"ASCENDING"}]},
+    {"collectionGroup":"koordinasi_notulen","queryScope":"COLLECTION","fields":[{"fieldPath":"rwId","order":"ASCENDING"},{"fieldPath":"rapatId","order":"ASCENDING"}]},
+    {"collectionGroup":"koordinasi_notulen","queryScope":"COLLECTION","fields":[{"fieldPath":"rtId","order":"ASCENDING"},{"fieldPath":"rapatId","order":"ASCENDING"}]},
+    {"collectionGroup":"koordinasi_perubahan","queryScope":"COLLECTION","fields":[{"fieldPath":"kawilId","order":"ASCENDING"},{"fieldPath":"referensiId","order":"ASCENDING"}]},
+    {"collectionGroup":"koordinasi_perubahan","queryScope":"COLLECTION","fields":[{"fieldPath":"rwId","order":"ASCENDING"},{"fieldPath":"referensiId","order":"ASCENDING"}]},
+    {"collectionGroup":"koordinasi_perubahan","queryScope":"COLLECTION","fields":[{"fieldPath":"rtId","order":"ASCENDING"},{"fieldPath":"referensiId","order":"ASCENDING"}]}
+  ],
+  "fieldOverrides": []
+}
