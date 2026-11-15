@@ -12,6 +12,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -858,6 +860,7 @@ const modules = <ModuleInfo>[
   ModuleInfo('kebersihan', 'Kebersihan', 'Jadwal pengangkutan sampah setiap Jumat pagi', Icons.cleaning_services_outlined),
   ModuleInfo('fasilitas_kesehatan', 'Fasilitas Kesehatan', 'Klinik, puskesmas dan apotek', Icons.local_hospital_outlined),
   ModuleInfo('organisasi', 'Organisasi & Lembaga Kampung', 'Karang Taruna, PKK, Posyandu, kelompok tani dan lainnya', Icons.groups_2_outlined),
+  ModuleInfo('pelayanan_masyarakat', 'Pelayanan Masyarakat', 'Surat online, pengaduan, kegiatan dan laporan RT/RW', Icons.volunteer_activism_outlined),
 ];
 
 class HomePage extends StatefulWidget {
@@ -2172,6 +2175,510 @@ class ProfileKampungSectionPage extends StatelessWidget {
   }
 }
 
+// ============================================================
+// TAHAP 2 - PELAYANAN MASYARAKAT
+// Koleksi: pelayanan_surat, pengaduan, kegiatan_rt, laporan_rt_bulanan
+// Data warga tetap mengambil referensi dari profil / Sensus yang sudah ada.
+// ============================================================
+
+class PelayananMasyarakatPage extends StatefulWidget {
+  final bool isAdmin;
+  const PelayananMasyarakatPage({super.key, required this.isAdmin});
+
+  @override
+  State<PelayananMasyarakatPage> createState() => _PelayananMasyarakatPageState();
+}
+
+class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
+  bool _busy = false;
+  Map<String, dynamic> _profile = {};
+  String get _uid => Db.auth.currentUser?.uid ?? '';
+  Set<String> get _roles {
+    final values = (_profile['roles'] is List)
+        ? (_profile['roles'] as List).map((e) => e.toString().toLowerCase()).toSet()
+        : <String>{};
+    values.add((_profile['role'] ?? 'warga').toString().toLowerCase());
+    values.add('warga');
+    return values;
+  }
+  bool get _ownerAdmin => widget.isAdmin || _roles.contains('owner') || _roles.contains('admin');
+  bool get _kawil => _roles.contains('perangkat_kawil');
+  bool get _rw => _roles.contains('ketua_rw');
+  bool get _rt => _roles.contains('ketua_rt');
+  bool get _staff => _ownerAdmin || _kawil || _rw || _rt;
+  bool get _canReviewRt => _staff;
+  bool get _canReviewRw => _ownerAdmin || _kawil || _rw;
+  bool get _canReviewKawil => _ownerAdmin || _kawil;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = TabController(length: 4, vsync: this);
+    _tabs.addListener(_onTabChanged);
+  }
+
+  void _onTabChanged() { if (mounted) setState(() {}); }
+
+  @override
+  void dispose() {
+    _tabs.removeListener(_onTabChanged);
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  Query<Map<String, dynamic>> _scopedQuery(String collection, {bool publishedOnly = false}) {
+    Query<Map<String, dynamic>> q = Db.module(collection);
+    if (_ownerAdmin) return q;
+    final kawilId = (_profile['kawilId'] ?? '').toString();
+    final rwId = (_profile['rwId'] ?? '').toString();
+    final rtId = (_profile['rtId'] ?? '').toString();
+    // Multi-role digabung otomatis. Role dengan cakupan terluas menentukan
+    // query; hak role lain tetap aktif untuk tindakan yang diizinkan.
+    if (_kawil && kawilId.isNotEmpty) return q.where('kawilId', isEqualTo: kawilId);
+    if (_rw && rwId.isNotEmpty) return q.where('rwId', isEqualTo: rwId);
+    if (_rt && rtId.isNotEmpty) return q.where('rtId', isEqualTo: rtId);
+    if (publishedOnly) return q.where('status', isEqualTo: 'terbit');
+    return q.where('pemohonUid', isEqualTo: _uid);
+  }
+
+  Query<Map<String, dynamic>> _letterQuery() => _scopedQuery('pelayanan_surat');
+  Query<Map<String, dynamic>> _complaintQuery() => _scopedQuery('pengaduan');
+  Query<Map<String, dynamic>> _activityQuery() => _staff
+      ? _scopedQuery('kegiatan_rt')
+      : _scopedQuery('kegiatan_rt', publishedOnly: true);
+  Query<Map<String, dynamic>> _reportQuery() => _scopedQuery('laporan_rt_bulanan');
+
+  String _name() => (_profile['nama'] ?? _profile['name'] ?? 'Warga').toString();
+  Map<String, dynamic> _areaPayload() => {
+    'kawil': (_profile['kawil'] ?? '').toString(),
+    'kawilId': (_profile['kawilId'] ?? '').toString(),
+    'rw': (_profile['rw'] ?? '').toString(),
+    'rwId': (_profile['rwId'] ?? '').toString(),
+    'rt': (_profile['rt'] ?? '').toString(),
+    'rtId': (_profile['rtId'] ?? '').toString(),
+  };
+
+  Future<void> _createLetter() async {
+    final form = GlobalKey<FormState>();
+    final purpose = TextEditingController();
+    final note = TextEditingController();
+    String type = 'Surat Pengantar';
+    const types = [
+      'Surat Pengantar', 'Surat Keterangan Domisili', 'Surat Keterangan Usaha',
+      'Surat Keterangan Tidak Mampu', 'Surat Keterangan Kelahiran',
+      'Surat Keterangan Kematian', 'Surat Keterangan Lainnya',
+    ];
+    final ok = await showDialog<bool>(context: context, builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Ajukan Surat'),
+        content: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          DropdownButtonFormField<String>(value: type, isExpanded: true, decoration: const InputDecoration(labelText: 'Jenis surat'),
+            items: types.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+            onChanged: (v) => setDialogState(() { if (v != null) type = v; })),
+          const SizedBox(height: 10),
+          TextFormField(controller: purpose, minLines: 2, maxLines: 4, decoration: const InputDecoration(labelText: 'Keperluan surat *', hintText: 'Jelaskan tujuan penggunaan surat'), validator: (v) => (v ?? '').trim().isEmpty ? 'Keperluan wajib diisi' : null),
+          const SizedBox(height: 10),
+          TextField(controller: note, minLines: 2, maxLines: 3, decoration: const InputDecoration(labelText: 'Catatan tambahan (opsional)')),
+          const SizedBox(height: 8),
+          const Text('Pengajuan akan diperiksa RT, diverifikasi RW, lalu disetujui Kawil sesuai kewenangan.', style: TextStyle(fontSize: 12, color: Colors.black54)),
+        ]))),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Batal')),
+          FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(dialogContext, true); }, child: const Text('Kirim pengajuan'))],
+      ),
+    ));
+    if (ok == true) {
+      await _runBusy(() async {
+        final now = DateTime.now();
+        final ref = Db.module('pelayanan_surat').doc();
+        await ref.set({
+          'nomorPengajuan': 'SR-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${ref.id.substring(0, 5).toUpperCase()}',
+          'jenisSurat': type, 'keperluan': purpose.text.trim(), 'catatanPemohon': note.text.trim(),
+          'pemohonUid': _uid, 'pemohonNama': _name(), 'wargaId': (_profile['wargaId'] ?? '').toString(),
+          'telepon': (_profile['telepon'] ?? '').toString(), ..._areaPayload(),
+          'status': 'diajukan', 'catatanPetugas': '',
+          'riwayatStatus': [{'status': 'diajukan', 'olehUid': _uid, 'olehNama': _name(), 'waktu': Timestamp.now(), 'catatan': 'Pengajuan dibuat'}],
+          'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
+        });
+      });
+    }
+    purpose.dispose(); note.dispose();
+  }
+
+  Future<void> _createComplaint() async {
+    final form = GlobalKey<FormState>();
+    final title = TextEditingController();
+    final description = TextEditingController();
+    final location = TextEditingController();
+    String category = 'Infrastruktur';
+    String urgency = 'Normal';
+    final ok = await showDialog<bool>(context: context, builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Kirim Pengaduan'),
+        content: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextFormField(controller: title, decoration: const InputDecoration(labelText: 'Judul pengaduan *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Judul wajib diisi' : null),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(value: category, decoration: const InputDecoration(labelText: 'Kategori'), items: const ['Infrastruktur','Kebersihan','Keamanan','Sosial','Administrasi','Lainnya'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: (v) => setDialogState(() { if (v != null) category = v; })),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(value: urgency, decoration: const InputDecoration(labelText: 'Prioritas'), items: const ['Rendah','Normal','Tinggi','Darurat'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: (v) => setDialogState(() { if (v != null) urgency = v; })),
+          const SizedBox(height: 10),
+          TextFormField(controller: description, minLines: 3, maxLines: 5, decoration: const InputDecoration(labelText: 'Uraian pengaduan *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Uraian wajib diisi' : null),
+          const SizedBox(height: 10),
+          TextField(controller: location, decoration: const InputDecoration(labelText: 'Lokasi kejadian / alamat')),
+        ]))),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Batal')),
+          FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(dialogContext, true); }, child: const Text('Kirim'))],
+      ),
+    ));
+    if (ok == true) {
+      await _runBusy(() async {
+        await Db.module('pengaduan').add({
+          'judul': title.text.trim(), 'kategori': category, 'prioritas': urgency,
+          'uraian': description.text.trim(), 'lokasi': location.text.trim(),
+          'pemohonUid': _uid, 'pemohonNama': _name(), 'wargaId': (_profile['wargaId'] ?? '').toString(),
+          ..._areaPayload(), 'status': 'baru', 'tanggapan': '',
+          'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
+        });
+      });
+    }
+    title.dispose(); description.dispose(); location.dispose();
+  }
+
+  Future<void> _createActivity() async {
+    final form = GlobalKey<FormState>();
+    final title = TextEditingController();
+    final description = TextEditingController();
+    final place = TextEditingController();
+    final date = TextEditingController(text: '${DateTime.now().day.toString().padLeft(2, '0')}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().year}');
+    final time = TextEditingController(text: '08.00');
+    bool publish = true;
+    final ok = await showDialog<bool>(context: context, builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Buat Kegiatan / Agenda'),
+        content: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextFormField(controller: title, decoration: const InputDecoration(labelText: 'Nama kegiatan *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Nama kegiatan wajib diisi' : null),
+          const SizedBox(height: 10),
+          TextFormField(controller: description, minLines: 2, maxLines: 4, decoration: const InputDecoration(labelText: 'Deskripsi')),
+          const SizedBox(height: 10),
+          TextFormField(controller: date, decoration: const InputDecoration(labelText: 'Tanggal (DD-MM-YYYY)')),
+          const SizedBox(height: 10),
+          TextFormField(controller: time, decoration: const InputDecoration(labelText: 'Waktu')),
+          const SizedBox(height: 10),
+          TextField(controller: place, decoration: const InputDecoration(labelText: 'Lokasi kegiatan')),
+          SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Terbitkan untuk warga'), subtitle: const Text('Kegiatan yang diterbitkan muncul pada daftar warga'), value: publish, onChanged: (v) => setDialogState(() => publish = v)),
+        ]))),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Batal')),
+          FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(dialogContext, true); }, child: const Text('Simpan kegiatan'))],
+      ),
+    ));
+    if (ok == true) {
+      await _runBusy(() async {
+        await Db.module('kegiatan_rt').add({
+          'judul': title.text.trim(), 'deskripsi': description.text.trim(), 'tanggal': date.text.trim(),
+          'waktu': time.text.trim(), 'lokasi': place.text.trim(), ..._areaPayload(),
+          'status': publish ? 'terbit' : 'draf', 'dibuatOlehUid': _uid, 'dibuatOlehNama': _name(),
+          'targetLevel': _ownerAdmin ? 'kampung' : _kawil ? 'kawil' : _rw ? 'rw' : 'rt',
+          'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
+        });
+        if (publish) {
+          // Antrean push agenda; Cloud Function Tahap 2 mengirimkannya ke token FCM warga.
+          await Db.module('notifikasi').add({
+            'jenis': 'agenda', 'judul': title.text.trim(), 'pesan': 'Ada kegiatan baru: ${title.text.trim()}',
+            ..._areaPayload(), 'targetLevel': _ownerAdmin ? 'kampung' : _kawil ? 'kawil' : _rw ? 'rw' : 'rt',
+            'status': 'baru', 'createdAt': FieldValue.serverTimestamp(),
+          });
+        }
+      });
+    }
+    title.dispose(); description.dispose(); place.dispose(); date.dispose(); time.dispose();
+  }
+
+  Future<void> _createMonthlyReport() async {
+    final form = GlobalKey<FormState>();
+    final kk = TextEditingController(text: '0');
+    final residents = TextEditingController(text: '0');
+    final incoming = TextEditingController(text: '0');
+    final resolved = TextEditingController(text: '0');
+    final activities = TextEditingController(text: '0');
+    final notes = TextEditingController();
+    final now = DateTime.now();
+    final ok = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: Text('Laporan Bulanan RT • ${now.month.toString().padLeft(2, '0')}/${now.year}'),
+      content: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        _numberField(kk, 'Jumlah KK'), _numberField(residents, 'Jumlah warga'),
+        _numberField(incoming, 'Pengaduan masuk'), _numberField(resolved, 'Pengaduan selesai'),
+        _numberField(activities, 'Kegiatan bulan ini'),
+        const SizedBox(height: 8), TextFormField(controller: notes, minLines: 3, maxLines: 5, decoration: const InputDecoration(labelText: 'Catatan / kendala')),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Batal')),
+        FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(dialogContext, true); }, child: const Text('Kirim laporan'))],
+    ));
+    if (ok == true) {
+      await _runBusy(() async {
+        final rtId = (_profile['rtId'] ?? '').toString();
+        final rwId = (_profile['rwId'] ?? '').toString();
+        await Db.module('laporan_rt_bulanan').add({
+          'bulan': now.month, 'tahun': now.year, 'periode': '${now.month.toString().padLeft(2, '0')}/${now.year}',
+          'rtId': rtId, 'rwId': rwId, ..._areaPayload(),
+          'rtNama': (_profile['rt'] ?? '').toString(), 'rwNama': (_profile['rw'] ?? '').toString(),
+          'jumlahKK': int.tryParse(kk.text) ?? 0, 'jumlahWarga': int.tryParse(residents.text) ?? 0,
+          'pengaduanMasuk': int.tryParse(incoming.text) ?? 0, 'pengaduanSelesai': int.tryParse(resolved.text) ?? 0,
+          'jumlahKegiatan': int.tryParse(activities.text) ?? 0, 'catatan': notes.text.trim(),
+          'status': 'dikirim', 'dikirimOlehUid': _uid, 'dikirimOlehNama': _name(),
+          'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      });
+    }
+    for (final c in [kk,residents,incoming,resolved,activities,notes]) { c.dispose(); }
+  }
+
+  Widget _numberField(TextEditingController c, String label) => Padding(
+    padding: const EdgeInsets.only(bottom: 9),
+    child: TextFormField(controller: c, keyboardType: TextInputType.number,
+      decoration: InputDecoration(labelText: label), validator: (v) => int.tryParse((v ?? '').trim()) == null ? 'Masukkan angka yang valid' : null),
+  );
+
+  Future<void> _runBusy(Future<void> Function() task) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try { await task(); if (mounted) showMessage(context, 'Data berhasil disimpan.'); }
+    catch (e) { if (mounted) showMessage(context, 'Gagal menyimpan: $e'); }
+    finally { if (mounted) setState(() => _busy = false); }
+  }
+
+  Future<void> _changeStatus(DocumentSnapshot<Map<String, dynamic>> doc, String status, {String note = ''}) async {
+    await _runBusy(() async {
+      await doc.reference.update({
+        'status': status, 'catatanPetugas': note,
+        'updatedAt': FieldValue.serverTimestamp(),
+        'riwayatStatus': FieldValue.arrayUnion([{
+          'status': status, 'olehUid': _uid, 'olehNama': _name(),
+          'waktu': Timestamp.now(), 'catatan': note,
+        }]),
+      });
+    });
+  }
+
+  Future<void> _resubmitLetter(DocumentSnapshot<Map<String, dynamic>> doc, Map<String, dynamic> data) async {
+    final purpose = TextEditingController(text: (data['keperluan'] ?? '').toString());
+    final note = TextEditingController(text: (data['catatanPemohon'] ?? '').toString());
+    final form = GlobalKey<FormState>();
+    final ok = await showDialog<bool>(context: context, builder: (dialogContext) => AlertDialog(
+      title: const Text('Perbaiki Pengajuan Surat'),
+      content: Form(key: form, child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextFormField(controller: purpose, minLines: 2, maxLines: 4, decoration: const InputDecoration(labelText: 'Keperluan surat *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Keperluan wajib diisi' : null),
+        const SizedBox(height: 10),
+        TextField(controller: note, minLines: 2, maxLines: 3, decoration: const InputDecoration(labelText: 'Catatan perbaikan')),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Batal')),
+        FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(dialogContext, true); }, child: const Text('Kirim ulang'))],
+    ));
+    if (ok == true) {
+      await _runBusy(() async {
+        await doc.reference.update({
+          'keperluan': purpose.text.trim(), 'catatanPemohon': note.text.trim(), 'status': 'diajukan',
+          'updatedAt': FieldValue.serverTimestamp(),
+          'riwayatStatus': FieldValue.arrayUnion([{'status':'diajukan','olehUid':_uid,'olehNama':_name(),'waktu':Timestamp.now(),'catatan':'Pengajuan diperbaiki dan dikirim ulang'}]),
+        });
+      });
+    }
+    purpose.dispose(); note.dispose();
+  }
+
+  Future<void> _showRecordDetail(String title, Map<String, dynamic> data,
+      DocumentSnapshot<Map<String, dynamic>> doc, String kind) async {
+    final status = (data['status'] ?? '').toString();
+    final history = (data['riwayatStatus'] is List) ? List.from(data['riwayatStatus']) : const [];
+    await showModalBottomSheet<void>(context: context, isScrollControlled: true,
+      backgroundColor: Colors.transparent, useSafeArea: true,
+      builder: (sheetContext) => Container(
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(sheetContext).size.height * .9),
+        decoration: const BoxDecoration(color: Color(0xFFF8F6F6), borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+        child: ListView(padding: const EdgeInsets.fromLTRB(18, 12, 18, 24), children: [
+          Center(child: Container(width: 42, height: 5, decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(8)))),
+          const SizedBox(height: 16),
+          Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          Align(alignment: Alignment.centerLeft, child: Chip(label: Text(status.toUpperCase()), backgroundColor: const Color(0xFFFCEAEA), labelStyle: const TextStyle(color: Color(0xFFC94B4B), fontWeight: FontWeight.bold))),
+          const SizedBox(height: 8),
+          ...data.entries.where((e) => !{'createdAt','updatedAt','riwayatStatus','createdBy','updatedBy'}.contains(e.key) && e.value != null && e.value.toString().trim().isNotEmpty).map((e) => Card(child: ListTile(title: Text(_fieldLabel(e.key), style: const TextStyle(fontSize: 12, color: Colors.black54)), subtitle: Text(e.value.toString(), style: const TextStyle(fontWeight: FontWeight.w600))))),
+          if (history.isNotEmpty) ...[
+            const Padding(padding: EdgeInsets.only(top: 12, bottom: 6), child: Text('Riwayat proses', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+            ...history.map((h) { final m = Map<String,dynamic>.from(h as Map); return ListTile(dense: true, leading: const Icon(Icons.check_circle_outline, color: Color(0xFFC94B4B)), title: Text((m['status'] ?? '').toString()), subtitle: Text('${m['olehNama'] ?? '-'} • ${m['catatan'] ?? ''}')); }),
+          ],
+          if (kind == 'surat') ...[
+            if (status == 'perlu_perbaikan' && (data['pemohonUid'] ?? '').toString() == _uid) OutlinedButton.icon(onPressed: () { Navigator.pop(sheetContext); _resubmitLetter(doc, data); }, icon: const Icon(Icons.refresh), label: const Text('Perbaiki dan kirim ulang')) ,
+            if (status == 'diajukan' && _canReviewRt) FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeStatus(doc, 'diperiksa_rt', note: 'Diperiksa oleh RT'); }, icon: const Icon(Icons.fact_check_outlined), label: const Text('Periksa sebagai RT')),
+            if (status == 'diperiksa_rt' && _canReviewRw) FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeStatus(doc, 'diverifikasi_rw', note: 'Diverifikasi oleh RW'); }, icon: const Icon(Icons.verified_outlined), label: const Text('Verifikasi sebagai RW')),
+            if (status == 'diverifikasi_rw' && _canReviewKawil) FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeStatus(doc, 'disetujui', note: 'Disetujui oleh Kawil'); }, icon: const Icon(Icons.verified), label: const Text('Setujui surat')),
+            if (status != 'disetujui' && status != 'ditolak' && _staff) OutlinedButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeStatus(doc, 'perlu_perbaikan', note: 'Mohon lengkapi atau perbaiki persyaratan'); }, icon: const Icon(Icons.edit_note), label: const Text('Minta perbaikan')),
+            if (status != 'disetujui' && status != 'ditolak' && _staff) TextButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeStatus(doc, 'ditolak', note: 'Pengajuan tidak dapat diproses'); }, icon: const Icon(Icons.cancel_outlined), label: const Text('Tolak pengajuan')),
+            if (status == 'disetujui') FilledButton.icon(onPressed: () { Navigator.pop(sheetContext); _printApprovedLetter(data); }, icon: const Icon(Icons.picture_as_pdf_outlined), label: const Text('Cetak / Simpan PDF Surat')),
+          ],
+          if (kind == 'pengaduan' && _staff && status != 'selesai' && status != 'ditolak') ...[
+            FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeStatus(doc, 'ditindaklanjuti', note: 'Pengaduan sedang ditindaklanjuti'); }, icon: const Icon(Icons.handyman_outlined), label: const Text('Tandai ditindaklanjuti')),
+            OutlinedButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeStatus(doc, 'selesai', note: 'Pengaduan telah diselesaikan'); }, icon: const Icon(Icons.task_alt), label: const Text('Tandai selesai')),
+          ],
+          if (kind == 'laporan' && _canReviewRw && status == 'dikirim') FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await doc.reference.update({'status':'diverifikasi_rw','updatedAt':FieldValue.serverTimestamp(),'verifikasiRwOleh':_uid}); }, icon: const Icon(Icons.verified_outlined), label: const Text('Verifikasi laporan RW')),
+          if (kind == 'laporan' && _canReviewKawil && status == 'diverifikasi_rw') FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await doc.reference.update({'status':'diterima_kawil','updatedAt':FieldValue.serverTimestamp(),'verifikasiKawilOleh':_uid}); }, icon: const Icon(Icons.verified), label: const Text('Terima laporan Kawil')),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _printApprovedLetter(Map<String, dynamic> data) async {
+    try {
+      final document = pw.Document();
+      final jenis = (data['jenisSurat'] ?? 'Surat Keterangan').toString();
+      final nomor = (data['nomorSurat'] ?? data['nomorPengajuan'] ?? 'Nomor ditetapkan pengurus').toString();
+      final nama = (data['pemohonNama'] ?? '-').toString();
+      final keperluan = (data['keperluan'] ?? '-').toString();
+      final wilayah = 'RT ${data['rt'] ?? '-'} / RW ${data['rw'] ?? '-'}';
+      final tanggal = DateTime.now();
+      final tanggalText = '${tanggal.day.toString().padLeft(2, '0')}-${tanggal.month.toString().padLeft(2, '0')}-${tanggal.year}';
+      document.addPage(pw.MultiPage(
+        pageFormat: pw.PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.fromLTRB(48, 42, 48, 42),
+        build: (context) => [
+          pw.Center(child: pw.Text('PEMERINTAH KAMPUNG KIARAJANGKUNG', style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold))),
+          pw.SizedBox(height: 4),
+          pw.Center(child: pw.Text('KECAMATAN SUKAHENING • KABUPATEN TASIKMALAYA', style: const pw.TextStyle(fontSize: 9))),
+          pw.SizedBox(height: 8),
+          pw.Divider(thickness: 2),
+          pw.SizedBox(height: 18),
+          pw.Center(child: pw.Text(jenis.toUpperCase(), style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, decoration: pw.TextDecoration.underline))),
+          pw.SizedBox(height: 5),
+          pw.Center(child: pw.Text('Nomor: $nomor', style: const pw.TextStyle(fontSize: 10))),
+          pw.SizedBox(height: 24),
+          pw.Text('Yang bertanda tangan di bawah ini menerangkan bahwa:', style: const pw.TextStyle(fontSize: 11)),
+          pw.SizedBox(height: 12),
+          pw.Table(columnWidths: {0: const pw.FixedColumnWidth(105), 1: const pw.FixedColumnWidth(12), 2: const pw.FlexColumnWidth()}, children: [
+            _pdfRow('Nama', nama),
+            _pdfRow('Wilayah', wilayah),
+            _pdfRow('Keperluan', keperluan),
+          ]),
+          pw.SizedBox(height: 18),
+          pw.Text('Surat keterangan ini dibuat berdasarkan pengajuan warga dan telah melalui proses pemeriksaan serta persetujuan perangkat wilayah melalui aplikasi Kampung Digital Kiarajangkung.', textAlign: pw.TextAlign.justify, style: const pw.TextStyle(fontSize: 11, lineSpacing: 4)),
+          pw.SizedBox(height: 10),
+          pw.Text('Demikian surat ini dibuat agar dapat dipergunakan sebagaimana mestinya.', style: const pw.TextStyle(fontSize: 11)),
+          pw.SizedBox(height: 35),
+          pw.Align(alignment: pw.Alignment.centerRight, child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.center, children: [
+            pw.Text('Kiarajangkung, $tanggalText', style: const pw.TextStyle(fontSize: 10)),
+            pw.SizedBox(height: 5),
+            pw.Text('Perangkat Kawil / Pejabat Berwenang', style: const pw.TextStyle(fontSize: 10)),
+            pw.SizedBox(height: 58),
+            pw.Text('____________________________', style: const pw.TextStyle(fontSize: 10)),
+            pw.Text('Nama dan tanda tangan', style: const pw.TextStyle(fontSize: 9)),
+          ])),
+          pw.SizedBox(height: 24),
+          pw.Divider(),
+          pw.Text('Dokumen ini dicetak dari aplikasi Kampung Digital Kiarajangkung. Pastikan nomor surat dan tanda tangan pejabat dilengkapi sesuai tata naskah kampung sebelum digunakan sebagai dokumen resmi.', style: const pw.TextStyle(fontSize: 8, color: pw.PdfColors.grey)),
+        ],
+      ));
+      await Printing.layoutPdf(onLayout: (format) async => document.save());
+    } catch (e) {
+      if (mounted) showMessage(context, 'Gagal membuat PDF: $e');
+    }
+  }
+
+  pw.TableRow _pdfRow(String label, String value) => pw.TableRow(children: [
+    pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 5), child: pw.Text(label, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold))),
+    pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 5), child: pw.Text(':', style: const pw.TextStyle(fontSize: 10))),
+    pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 5), child: pw.Text(value, style: const pw.TextStyle(fontSize: 10))),
+  ]);
+
+  String _fieldLabel(String key) {
+    const labels = {
+      'jenisSurat':'Jenis surat','keperluan':'Keperluan','pemohonNama':'Nama pemohon','nomorPengajuan':'Nomor pengajuan',
+      'catatanPemohon':'Catatan pemohon','catatanPetugas':'Catatan petugas','rt':'RT','rw':'RW','kawil':'Kawil',
+      'judul':'Judul','kategori':'Kategori','prioritas':'Prioritas','uraian':'Uraian','lokasi':'Lokasi',
+      'tanggal':'Tanggal','waktu':'Waktu','deskripsi':'Deskripsi','jumlahKK':'Jumlah KK','jumlahWarga':'Jumlah warga',
+      'pengaduanMasuk':'Pengaduan masuk','pengaduanSelesai':'Pengaduan selesai','jumlahKegiatan':'Jumlah kegiatan','periode':'Periode','catatan':'Catatan',
+      'rtNama':'RT','rwNama':'RW','dikirimOlehNama':'Dikirim oleh','status':'Status'
+    };
+    return labels[key] ?? key;
+  }
+
+  Widget _records(Query<Map<String, dynamic>> query, String kind) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    stream: query.snapshots(),
+    builder: (context, snapshot) {
+      if (snapshot.hasError) return Center(child: Padding(padding: const EdgeInsets.all(20), child: Text('Gagal memuat data: ${snapshot.error}')));
+      if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+      final docs = snapshot.data!.docs.toList();
+      docs.sort((a,b) => _sortDate(b.data()['createdAt']).compareTo(_sortDate(a.data()['createdAt'])));
+      if (docs.isEmpty) return Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_emptyText(kind), textAlign: TextAlign.center)));
+      return ListView.builder(padding: const EdgeInsets.fromLTRB(14, 12, 14, 90), itemCount: docs.length, itemBuilder: (context, index) {
+        final doc = docs[index]; final d = doc.data();
+        final title = (d['jenisSurat'] ?? d['judul'] ?? d['periode'] ?? 'Data pelayanan').toString();
+        final subtitle = kind == 'surat' ? '${d['pemohonNama'] ?? '-'} • ${d['keperluan'] ?? ''}' : kind == 'pengaduan' ? '${d['kategori'] ?? '-'} • ${d['prioritas'] ?? 'Normal'}' : kind == 'kegiatan' ? '${d['tanggal'] ?? '-'} • ${d['waktu'] ?? ''} • ${d['lokasi'] ?? ''}' : 'RT ${d['rtNama'] ?? d['rt'] ?? '-'} • ${d['periode'] ?? '-'}';
+        final status = (d['status'] ?? 'baru').toString();
+        return Card(margin: const EdgeInsets.only(bottom: 10), child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+          leading: CircleAvatar(backgroundColor: const Color(0xFFFCEAEA), child: Icon(_kindIcon(kind), color: const Color(0xFFC94B4B))),
+          title: Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+          subtitle: Padding(padding: const EdgeInsets.only(top: 5), child: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis)),
+          trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Flexible(child: Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5), decoration: BoxDecoration(color: _statusColor(status).withOpacity(.10), borderRadius: BorderRadius.circular(20)), child: Text(status.replaceAll('_',' ').toUpperCase(), style: TextStyle(color: _statusColor(status), fontSize: 9, fontWeight: FontWeight.w800)))),
+            const SizedBox(height: 4), const Icon(Icons.chevron_right, size: 18),
+          ]),
+          onTap: () => _showRecordDetail(title, d, doc, kind == 'kegiatan' ? 'kegiatan' : kind),
+        ));
+      });
+    },
+  );
+
+  String _emptyText(String kind) => switch (kind) {
+    'surat' => 'Belum ada pengajuan surat. Tekan tombol Ajukan Surat untuk memulai.',
+    'pengaduan' => 'Belum ada pengaduan pada wilayah atau akun Anda.',
+    'kegiatan' => 'Belum ada kegiatan yang diterbitkan.',
+    _ => 'Belum ada laporan bulanan yang tersedia.',
+  };
+  IconData _kindIcon(String kind) => switch (kind) {
+    'surat' => Icons.description_outlined, 'pengaduan' => Icons.support_agent_outlined,
+    'kegiatan' => Icons.event_note_outlined, _ => Icons.assessment_outlined,
+  };
+  DateTime _sortDate(dynamic value) => value is Timestamp ? value.toDate() : DateTime.tryParse((value ?? '').toString()) ?? DateTime(2000);
+  Color _statusColor(String status) {
+    if (['disetujui','selesai','diterima_kawil','terbit'].contains(status)) return const Color(0xFF2E8B57);
+    if (['ditolak','perlu_perbaikan'].contains(status)) return const Color(0xFFB93838);
+    if (['diajukan','baru','dikirim','draf'].contains(status)) return const Color(0xFFB7791F);
+    return const Color(0xFF667085);
+  }
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+    stream: Db.user(_uid).snapshots(),
+    builder: (context, profileSnap) {
+      if (profileSnap.hasError) return Scaffold(appBar: AppBar(title: const Text('Pelayanan Masyarakat')), body: Center(child: Text('Gagal membaca profil: ${profileSnap.error}')));
+      if (!profileSnap.hasData) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      _profile = profileSnap.data!.data() ?? {};
+      return Scaffold(
+        appBar: AppBar(title: const Text('Pelayanan Masyarakat'), bottom: TabBar(controller: _tabs, isScrollable: true, tabs: const [
+          Tab(icon: Icon(Icons.description_outlined), text: 'Surat'),
+          Tab(icon: Icon(Icons.support_agent_outlined), text: 'Pengaduan'),
+          Tab(icon: Icon(Icons.event_note_outlined), text: 'Kegiatan'),
+          Tab(icon: Icon(Icons.assessment_outlined), text: 'Laporan RT'),
+        ])),
+        body: Stack(children: [TabBarView(controller: _tabs, children: [
+          _records(_letterQuery(), 'surat'), _records(_complaintQuery(), 'pengaduan'),
+          _records(_activityQuery(), 'kegiatan'), _records(_reportQuery(), 'laporan'),
+        ]), if (_busy) const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator())]),
+        floatingActionButton: _tabs.index == 0
+          ? FloatingActionButton.extended(onPressed: _busy ? null : _createLetter, icon: const Icon(Icons.add), label: const Text('Ajukan Surat'))
+          : _tabs.index == 1
+            ? FloatingActionButton.extended(onPressed: _busy ? null : _createComplaint, icon: const Icon(Icons.add), label: const Text('Buat Pengaduan'))
+            : _tabs.index == 2 && _staff
+              ? FloatingActionButton.extended(onPressed: _busy ? null : _createActivity, icon: const Icon(Icons.add), label: const Text('Buat Kegiatan'))
+              : _tabs.index == 3 && _rt
+                ? FloatingActionButton.extended(onPressed: _busy ? null : _createMonthlyReport, icon: const Icon(Icons.add), label: const Text('Laporan Bulanan'))
+                : null,
+      );
+    },
+  );
+}
+
+
 class ModulePage extends StatefulWidget {
   final ModuleInfo module;
   final bool isAdmin;
@@ -2211,6 +2718,9 @@ class _ModulePageState extends State<ModulePage> {
     }
     if (module.keyName == 'ronda') {
       return RondaSchedulePage(isAdmin: isAdmin);
+    }
+    if (module.keyName == 'pelayanan_masyarakat') {
+      return PelayananMasyarakatPage(isAdmin: isAdmin);
     }
     if (module.keyName == 'informasi_diri') {
       return const InformasiDiriPage();
