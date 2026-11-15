@@ -16,6 +16,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:pdf/pdf.dart' as pdf;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -2418,16 +2419,27 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
       await _runBusy(() async {
         final rtId = (_profile['rtId'] ?? '').toString();
         final rwId = (_profile['rwId'] ?? '').toString();
-        await Db.module('laporan_rt_bulanan').add({
-          'bulan': now.month, 'tahun': now.year, 'periode': '${now.month.toString().padLeft(2, '0')}/${now.year}',
-          'rtId': rtId, 'rwId': rwId, ..._areaPayload(),
-          'rtNama': (_profile['rt'] ?? '').toString(), 'rwNama': (_profile['rw'] ?? '').toString(),
-          'jumlahKK': int.tryParse(kk.text) ?? 0, 'jumlahWarga': int.tryParse(residents.text) ?? 0,
-          'pengaduanMasuk': int.tryParse(incoming.text) ?? 0, 'pengaduanSelesai': int.tryParse(resolved.text) ?? 0,
-          'jumlahKegiatan': int.tryParse(activities.text) ?? 0, 'catatan': notes.text.trim(),
-          'status': 'dikirim', 'dikirimOlehUid': _uid, 'dikirimOlehNama': _name(),
-          'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+                await Db.module('laporan_rt_bulanan').add({
+          'bulan': now.month,
+          'tahun': now.year,
+          'periode': '${now.month.toString().padLeft(2, '0')}/${now.year}',
+          'rtId': rtId,
+          'rwId': rwId,
+          ..._areaPayload(),
+          'rtNama': (_profile['rt'] ?? '').toString(),
+          'rwNama': (_profile['rw'] ?? '').toString(),
+          'jumlahKK': int.tryParse(kk.text) ?? 0,
+          'jumlahWarga': int.tryParse(residents.text) ?? 0,
+          'pengaduanMasuk': int.tryParse(incoming.text) ?? 0,
+          'pengaduanSelesai': int.tryParse(resolved.text) ?? 0,
+          'jumlahKegiatan': int.tryParse(activities.text) ?? 0,
+          'catatan': notes.text.trim(),
+          'status': 'dikirim',
+          'dikirimOlehUid': _uid,
+          'dikirimOlehNama': _name(),
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
       });
     }
     for (final c in [kk,residents,incoming,resolved,activities,notes]) { c.dispose(); }
@@ -2538,7 +2550,7 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
       final tanggal = DateTime.now();
       final tanggalText = '${tanggal.day.toString().padLeft(2, '0')}-${tanggal.month.toString().padLeft(2, '0')}-${tanggal.year}';
       document.addPage(pw.MultiPage(
-        pageFormat: pw.PdfPageFormat.a4,
+        pageFormat: pdf.PdfPageFormat.a4,
         margin: const pw.EdgeInsets.fromLTRB(48, 42, 48, 42),
         build: (context) => [
           pw.Center(child: pw.Text('PEMERINTAH KAMPUNG KIARAJANGKUNG', style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold))),
@@ -2573,7 +2585,7 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
           ])),
           pw.SizedBox(height: 24),
           pw.Divider(),
-          pw.Text('Dokumen ini dicetak dari aplikasi Kampung Digital Kiarajangkung. Pastikan nomor surat dan tanda tangan pejabat dilengkapi sesuai tata naskah kampung sebelum digunakan sebagai dokumen resmi.', style: const pw.TextStyle(fontSize: 8, color: pw.PdfColors.grey)),
+          pw.Text('Dokumen ini dicetak dari aplikasi Kampung Digital Kiarajangkung. Pastikan nomor surat dan tanda tangan pejabat dilengkapi sesuai tata naskah kampung sebelum digunakan sebagai dokumen resmi.', style: const pw.TextStyle(fontSize: 8, color: pdf.PdfColors.grey)),
         ],
       ));
       await Printing.layoutPdf(onLayout: (format) async => document.save());
