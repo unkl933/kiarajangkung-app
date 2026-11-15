@@ -9,6 +9,7 @@ import 'package:excel/excel.dart' as xls;
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
@@ -331,7 +332,22 @@ Future<void> syncAccountProfileFromSensus(String wargaId, Map<String, dynamic> d
     if (data.containsKey('rwId')) updates['rwId'] = data['rwId'];
     if (data.containsKey('rtId')) updates['rtId'] = data['rtId'];
   }
-  await Db.user(uid).update(updates);
+  // Dokumen /users/{uid} bisa belum ada (misalnya terhapus saat
+  // pemulihan akun). Jangan gagalkan penyimpanan Sensus hanya karena
+  // profil akun belum tersedia. Profil lengkap dipulihkan melalui
+  // fitur Reset Akun Warga milik Owner.
+  final userRef = Db.user(uid);
+  final userSnap = await userRef.get();
+  if (userSnap.exists) {
+    await userRef.update(updates);
+  }
+}
+
+Future<void> updateUserProfileIfExists(String uid, Map<String, dynamic> updates) async {
+  if (uid.trim().isEmpty) return;
+  final ref = Db.user(uid);
+  final snap = await ref.get();
+  if (snap.exists) await ref.update(updates);
 }
 
 class PushService {
@@ -4141,10 +4157,10 @@ Future<void> showRecordForm(
                               final accountData = accountSnap.data() ?? <String, dynamic>{};
                               if ((accountData['status'] ?? 'Aktif') == 'Aktif') {
                                 await recordRef.update({'statusAkunSebelumArsip': 'Aktif'});
-                                await Db.user(accountUid).update({'status': 'Nonaktif', 'updatedAt': FieldValue.serverTimestamp()});
+                                await updateUserProfileIfExists(accountUid, {'status': 'Nonaktif', 'updatedAt': FieldValue.serverTimestamp()});
                               }
                             } else if (payload['statusWarga'] == 'Aktif' && initial?['statusWarga'] == 'Arsip' && accountUid.isNotEmpty && initial?['statusAkunSebelumArsip'] == 'Aktif') {
-                              await Db.user(accountUid).update({'status': 'Aktif', 'updatedAt': FieldValue.serverTimestamp()});
+                              await updateUserProfileIfExists(accountUid, {'status': 'Aktif', 'updatedAt': FieldValue.serverTimestamp()});
                             }
                             await writeWargaAudit(wargaId: docId, modul: 'sensus', aksi: payload['statusWarga'] == 'Arsip' && initial?['statusWarga'] != 'Arsip' ? 'warga diarsipkan' : 'data identitas diperbarui', peran: 'identitas', namaWarga: (payload['nama'] ?? '').toString(), recordId: docId);
                           } else {
@@ -4232,7 +4248,7 @@ class ArchivedResidentsPage extends StatelessWidget {
                       await doc.reference.update({'statusWarga': 'Aktif', 'diaktifkanKembaliPada': FieldValue.serverTimestamp(), 'diaktifkanKembaliOleh': Db.auth.currentUser?.uid, 'updatedAt': FieldValue.serverTimestamp()});
                       final accountUid = (d['accountUid'] ?? '').toString();
                       if (accountUid.isNotEmpty && d['statusAkunSebelumArsip'] == 'Aktif') {
-                        await Db.user(accountUid).update({'status': 'Aktif', 'updatedAt': FieldValue.serverTimestamp()});
+                        await updateUserProfileIfExists(accountUid, {'status': 'Aktif', 'updatedAt': FieldValue.serverTimestamp()});
                       }
                       await writeWargaAudit(wargaId: doc.id, modul: 'sensus', aksi: 'diaktifkan kembali dari arsip', peran: 'status warga', namaWarga: (d['nama'] ?? '').toString());
                       if (context.mounted) showMessage(context, 'Warga berhasil diaktifkan kembali.');
@@ -5366,6 +5382,23 @@ class UserManagementPage extends StatelessWidget {
                   children: [
                     if (isOwner)
                       Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.lock_reset),
+                          title: const Text('Reset akun warga ke default'),
+                          subtitle: const Text(
+                            'Reset username ke NIK dan password ke tanggal lahir (DDMMYYYY).',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ResidentAccountResetPage(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (isOwner)
+                      Card(
                         color: Theme.of(context).colorScheme.primaryContainer,
                         child: ListTile(
                           leading: const Icon(Icons.replay_circle_filled_outlined),
@@ -5442,6 +5475,235 @@ class UserManagementPage extends StatelessWidget {
         ),
       );
 }
+
+
+/// Halaman reset akun warga. Otorisasi final tetap dilakukan oleh Cloud Function.
+class ResidentAccountResetPage extends StatefulWidget {
+  const ResidentAccountResetPage({super.key});
+
+  @override
+  State<ResidentAccountResetPage> createState() =>
+      _ResidentAccountResetPageState();
+}
+
+class _ResidentAccountResetPageState extends State<ResidentAccountResetPage> {
+  final TextEditingController _search = TextEditingController();
+  late Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _residentsFuture;
+  bool _working = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _residentsFuture = _loadResidents();
+    _search.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _loadResidents() async {
+    final snapshot = await Db.module('sensus').get();
+    final docs = snapshot.docs.where((doc) {
+      final d = doc.data();
+      return (d['nama'] ?? '').toString().trim().isNotEmpty &&
+          (d['nik'] ?? '').toString().trim().isNotEmpty;
+    }).toList();
+    docs.sort((a, b) => (a.data()['nama'] ?? '')
+        .toString()
+        .toLowerCase()
+        .compareTo((b.data()['nama'] ?? '').toString().toLowerCase()));
+    return docs;
+  }
+
+  Future<void> _reset(
+    QueryDocumentSnapshot<Map<String, dynamic>> resident,
+  ) async {
+    final data = resident.data();
+    final name = (data['nama'] ?? 'Tanpa nama').toString();
+    final nik = normalizeNik((data['nik'] ?? '').toString());
+    final uid = (data['accountUid'] ?? '').toString().trim();
+
+    if (uid.isEmpty) {
+      showMessage(context,
+          'Warga ini belum memiliki accountUid. Reset dibatalkan agar tidak membuat akun duplikat.');
+      return;
+    }
+    if (nik.length != 16) {
+      showMessage(context, 'NIK warga tidak valid. Periksa data Sensus terlebih dahulu.');
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset akun warga?'),
+        content: Text(
+          'Akun $name akan direset:\n\n'
+          'Username: $nik\n'
+          'Password awal: tanggal lahir (DDMMYYYY)\n\n'
+          'Warga wajib mengganti password setelah login. Data Sensus tidak diubah.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.lock_reset),
+            label: const Text('Reset akun'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _working = true);
+    try {
+      final callable =
+          FirebaseFunctions.instance.httpsCallable('resetResidentAccount');
+      final result = await callable.call(<String, dynamic>{
+        'wargaId': resident.id,
+      });
+      final response = result.data;
+      final message = response is Map
+          ? (response['message'] ?? 'Akun warga berhasil direset.').toString()
+          : 'Akun warga berhasil direset.';
+      if (mounted) showMessage(context, message);
+    } on FirebaseFunctionsException catch (e) {
+      if (mounted) {
+        showMessage(context, 'Reset akun gagal: ${e.message ?? e.code}');
+      }
+    } catch (e) {
+      if (mounted) showMessage(context, 'Reset akun gagal: $e');
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _search.text.trim().toLowerCase();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Reset akun warga')),
+      body: FutureBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+        future: _residentsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Text('Gagal memuat data Sensus: ${snapshot.error}'),
+              ),
+            );
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final residents = snapshot.data!.where((doc) {
+            final d = doc.data();
+            final name = (d['nama'] ?? '').toString().toLowerCase();
+            final nik = (d['nik'] ?? '').toString();
+            return query.isEmpty || name.contains(query) || nik.contains(query);
+          }).toList();
+
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: TextField(
+                  controller: _search,
+                  decoration: InputDecoration(
+                    hintText: 'Cari nama atau NIK warga',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _search.text.isEmpty
+                        ? null
+                        : IconButton(
+                            onPressed: () => _search.clear(),
+                            icon: const Icon(Icons.close),
+                          ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Pilih warga dari Sensus. Reset hanya bekerja pada akun yang sudah memiliki accountUid dan tidak membuat akun Firebase baru.',
+                  ),
+                ),
+              ),
+              Expanded(
+                child: residents.isEmpty
+                    ? const Center(child: Text('Data warga tidak ditemukan.'))
+                    : ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                        itemCount: residents.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final doc = residents[index];
+                          final d = doc.data();
+                          final nik = (d['nik'] ?? '').toString();
+                          final hasAccount =
+                              (d['accountUid'] ?? '').toString().trim().isNotEmpty;
+                          final maskedNik = nik.length == 16
+                              ? '${nik.substring(0, 4)}********${nik.substring(12)}'
+                              : nik;
+                          return Card(
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                child: Icon(hasAccount
+                                    ? Icons.person
+                                    : Icons.person_off_outlined),
+                              ),
+                              title: Text((d['nama'] ?? 'Tanpa nama').toString()),
+                              subtitle: Text(
+                                'NIK: $maskedNik\n'
+                                '${hasAccount ? 'Akun terhubung' : 'Belum memiliki accountUid'}',
+                              ),
+                              isThreeLine: true,
+                              trailing: _working
+                                  ? const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : IconButton(
+                                      tooltip: 'Reset akun warga',
+                                      onPressed: hasAccount
+                                          ? () => _reset(doc)
+                                          : null,
+                                      icon: const Icon(Icons.lock_reset),
+                                    ),
+                              onTap: hasAccount && !_working
+                                  ? () => _reset(doc)
+                                  : null,
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
 
 Future<bool?> confirmDelete(BuildContext context) => showDialog<bool>(
       context: context,
