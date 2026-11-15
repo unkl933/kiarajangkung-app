@@ -5618,7 +5618,6 @@ class _ResidentAccountResetPageState extends State<ResidentAccountResetPage> {
 
     setState(() => _working = true);
     try {
-<<<<<<< HEAD
       // Reset akun diproses oleh Google Apps Script (Code.gs), bukan
       // Cloud Functions. Ini kompatibel dengan Firebase Spark Plan.
       final response = await PhotoService._request({
@@ -5628,22 +5627,6 @@ class _ResidentAccountResetPageState extends State<ResidentAccountResetPage> {
       final message = (response['message'] ?? 'Akun warga berhasil direset.')
           .toString();
       if (mounted) showMessage(context, message);
-=======
-      final callable =
-          FirebaseFunctions.instance.httpsCallable('resetResidentAccount');
-      final result = await callable.call(<String, dynamic>{
-        'wargaId': resident.id,
-      });
-      final response = result.data;
-      final message = response is Map
-          ? (response['message'] ?? 'Akun warga berhasil direset.').toString()
-          : 'Akun warga berhasil direset.';
-      if (mounted) showMessage(context, message);
-    } on FirebaseFunctionsException catch (e) {
-      if (mounted) {
-        showMessage(context, 'Reset akun gagal: ${e.message ?? e.code}');
-      }
->>>>>>> 2ed1683e52bd9149a16a4d13166c4bcf80a35593
     } catch (e) {
       if (mounted) showMessage(context, 'Reset akun gagal: $e');
     } finally {
