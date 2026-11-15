@@ -5365,13 +5365,43 @@ class UserManagementPage extends StatelessWidget {
         body: FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           future: Db.user(Db.auth.currentUser!.uid).get(),
           builder: (context, me) {
-            if (!me.hasData) return const Center(child: CircularProgressIndicator());
+            if (me.hasError) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Text('Gagal membaca profil akun: ${me.error}'),
+                ),
+              );
+            }
+            if (!me.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (!me.data!.exists) {
+              return const Center(
+                child: Text(
+                  'Profil akun tidak ditemukan di Firestore (/users). '
+                  'Hubungi Owner untuk memulihkan profil akun.',
+                  textAlign: TextAlign.center,
+                ),
+              );
+            }
+
             final meData = me.data!.data() ?? <String, dynamic>{};
-            final meRoles = (meData['roles'] is List)
-                ? (meData['roles'] as List).map((e) => e.toString().toLowerCase()).toSet()
-                : <String>{(meData['role'] ?? '').toString().toLowerCase()};
-            final isOwner = meRoles.contains('owner') ||
-                (meData['role'] ?? '').toString().toLowerCase() == 'owner';
+
+            // Baca role dan roles secara terpisah agar role utama tetap
+            // diperhitungkan meskipun field roles juga tersedia.
+            final meRoles = <String>{
+              (meData['role'] ?? '').toString().trim().toLowerCase(),
+              if (meData['roles'] is List)
+                ...((meData['roles'] as List)
+                    .map((e) => e.toString().trim().toLowerCase())),
+              if (meData['roles'] is String)
+                ...(meData['roles'] as String)
+                    .split(RegExp(r'[,;]'))
+                    .map((e) => e.trim().toLowerCase()),
+            }..removeWhere((role) => role.isEmpty);
+
+            final isOwner = meRoles.contains('owner');
             return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: Db.firestore.collection('users').orderBy('nama').snapshots(),
               builder: (context, snapshot) {
@@ -5380,13 +5410,19 @@ class UserManagementPage extends StatelessWidget {
                 return ListView(
                   padding: const EdgeInsets.all(12),
                   children: [
-                    if (isOwner)
+                    if (isOwner) ...[
                       Card(
                         child: ListTile(
-                          leading: const Icon(Icons.lock_reset),
-                          title: const Text('Reset akun warga ke default'),
+                          leading: const Icon(
+                            Icons.lock_reset,
+                            color: Colors.red,
+                          ),
+                          title: const Text(
+                            'Reset akun warga ke default',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
                           subtitle: const Text(
-                            'Reset username ke NIK dan password ke tanggal lahir (DDMMYYYY).',
+                            'Username menggunakan NIK dan password awal tanggal lahir (DDMMYYYY).',
                           ),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () => Navigator.push(
@@ -5397,38 +5433,61 @@ class UserManagementPage extends StatelessWidget {
                           ),
                         ),
                       ),
-                    if (isOwner)
                       Card(
                         color: Theme.of(context).colorScheme.primaryContainer,
                         child: ListTile(
                           leading: const Icon(Icons.replay_circle_filled_outlined),
                           title: const Text('Pulihkan login Owner dengan NIK'),
-                          subtitle: const Text('Membuat ulang akun NIK dari data Sensus milik Owner yang sedang login. Data Sensus tidak dibuat ulang.'),
+                          subtitle: const Text(
+                            'Membuat akun login NIK berdasarkan data Sensus Owner yang sedang login. Data Sensus tidak dibuat ulang.',
+                          ),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () async {
                             final confirmed = await showDialog<bool>(
                               context: context,
                               builder: (ctx) => AlertDialog(
                                 title: const Text('Pulihkan akun NIK Owner?'),
-                                content: const Text('Sistem akan membuat akun login NIK berdasarkan data Sensus Owner yang sedang login. Password awal adalah tanggal lahir (DDMMYYYY) dan wajib diganti setelah login.'),
+                                content: const Text(
+                                  'Sistem akan membuat akun login NIK berdasarkan data Sensus Owner yang sedang login. Password awal adalah tanggal lahir (DDMMYYYY) dan wajib diganti setelah login.',
+                                ),
                                 actions: [
-                                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
-                                  FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Pulihkan akun')),
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx, false),
+                                    child: const Text('Batal'),
+                                  ),
+                                  FilledButton(
+                                    onPressed: () => Navigator.pop(ctx, true),
+                                    child: const Text('Pulihkan akun'),
+                                  ),
                                 ],
                               ),
                             );
+
                             if (confirmed != true || !context.mounted) return;
+
                             try {
-                              final result = await PhotoService.restoreOwnerNikAccount();
+                              final result =
+                                  await PhotoService.restoreOwnerNikAccount();
                               if (context.mounted) {
-                                showMessage(context, (result['message'] ?? 'Akun NIK Owner berhasil dipulihkan.').toString());
+                                showMessage(
+                                  context,
+                                  (result['message'] ??
+                                          'Akun NIK Owner berhasil dipulihkan.')
+                                      .toString(),
+                                );
                               }
                             } catch (e) {
-                              if (context.mounted) showMessage(context, 'Pemulihan akun gagal: $e');
+                              if (context.mounted) {
+                                showMessage(
+                                  context,
+                                  'Pemulihan akun gagal: $e',
+                                );
+                              }
                             }
                           },
                         ),
                       ),
+                    ],
                     ...snapshot.data!.docs.map((doc) {
                     final d = doc.data();
                     final role = (d['role'] ?? 'warga').toString();
