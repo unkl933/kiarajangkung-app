@@ -101,9 +101,12 @@ class KampungDigitalApp extends StatelessWidget {
           titleTextStyle: const TextStyle(color: ink, fontSize: 18, fontWeight: FontWeight.w800),
         ),
         bottomSheetTheme: const BottomSheetThemeData(
-          backgroundColor: Colors.transparent,
+          backgroundColor: Colors.white,
           surfaceTintColor: Colors.transparent,
           showDragHandle: false,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+          ),
         ),
         filledButtonTheme: FilledButtonThemeData(
           style: FilledButton.styleFrom(
