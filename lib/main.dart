@@ -692,7 +692,50 @@ class _LoginPageState extends State<LoginPage> {
               keyboardType: TextInputType.number,
               maxLength: 16,
               decoration: const InputDecoration(labelText: 'NIK 16 digit'),
-              validator: (v) => RegExp(r'^\\d{16}
+              validator: (v) => RegExp(r'^\d{16}$').hasMatch((v ?? '').trim()) ? null : 'NIK harus 16 digit.',
+            ),
+            TextFormField(
+              controller: dobController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Tanggal lahir (DDMMYYYY)', hintText: 'Contoh: 01011990'),
+              validator: (v) => RegExp(r'^\d{8}$').hasMatch((v ?? '').replaceAll(RegExp(r'\D'), '')) ? null : 'Gunakan format DDMMYYYY.',
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          FilledButton(onPressed: () { if (formKey.currentState!.validate()) Navigator.pop(ctx, true); }, child: const Text('Kirim permintaan')),
+        ],
+      ),
+    );
+    if (submitted != true || !mounted) {
+      nikController.dispose();
+      dobController.dispose();
+      return;
+    }
+    setState(() => busy = true);
+    try {
+      final result = await PhotoService._request({
+        'action': 'requestResidentAccount',
+        'nik': nikController.text.trim(),
+        'tanggalLahir': dobController.text.replaceAll(RegExp(r'\D'), ''),
+      }, requireAuth: false);
+      if (mounted) showMessage(context, (result['message'] ?? 'Permintaan telah dikirim jika data cocok.').toString());
+    } catch (e) {
+      if (mounted) showMessage(context, 'Permintaan belum dapat dikirim. Coba kembali beberapa saat lagi.');
+    } finally {
+      nikController.dispose();
+      dobController.dispose();
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    email.dispose();
+    password.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
