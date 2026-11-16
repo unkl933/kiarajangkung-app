@@ -368,3 +368,52 @@ test('warga tidak dapat membaca laporan RT bulanan lintas wilayah', async () => 
   const db = env.authenticatedContext('wargaA').firestore();
   await assertFails(getDocs(collection(db, root, 'laporan_rt_bulanan')));
 });
+
+test('Admin dapat membaca permintaan akun semua wilayah, Ketua RT hanya wilayahnya', async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    await setDoc(doc(db, root, 'permintaan_akun', 'request-rt-1'), {
+      wargaId: 'warga-a', nama: 'Warga A', rtId: 'rt-1', status: 'menunggu',
+    });
+    await setDoc(doc(db, root, 'permintaan_akun', 'request-rt-2'), {
+      wargaId: 'warga-lain', nama: 'Warga Lain', rtId: 'rt-2', status: 'menunggu',
+    });
+    await setDoc(doc(db, root, 'riwayat_akun', 'history-1'), {
+      aksi: 'reset_password', olehUid: 'admin',
+    });
+  });
+  const rtDb = env.authenticatedContext('rt').firestore();
+  const wrongRtDb = env.authenticatedContext('rtWrong').firestore();
+  const adminDb = env.authenticatedContext('admin').firestore();
+  const ownerDb = env.authenticatedContext('owner').firestore();
+  await assertSucceeds(getDoc(doc(rtDb, root, 'permintaan_akun', 'request-rt-1')));
+  await assertFails(getDoc(doc(rtDb, root, 'permintaan_akun', 'request-rt-2')));
+  await assertFails(getDoc(doc(wrongRtDb, root, 'permintaan_akun', 'request-rt-1')));
+  await assertSucceeds(getDoc(doc(adminDb, root, 'permintaan_akun', 'request-rt-2')));
+  await assertFails(getDoc(doc(ownerDb, root, 'permintaan_akun', 'request-rt-1')));
+  await assertSucceeds(getDoc(doc(adminDb, root, 'riwayat_akun', 'history-1')));
+  await assertSucceeds(getDoc(doc(ownerDb, root, 'riwayat_akun', 'history-1')));
+  await assertFails(getDoc(doc(rtDb, root, 'riwayat_akun', 'history-1')));
+});
+
+test('Permintaan akun dan riwayat akun tidak dapat ditulis langsung dari aplikasi', async () => {
+  await env.withSecurityRulesDisabled(async context => {
+    await setDoc(doc(context.firestore(), root, 'permintaan_akun', 'request-protected'), {
+      wargaId: 'warga-a', nama: 'Warga A', rtId: 'rt-1', status: 'menunggu',
+    });
+    await setDoc(doc(context.firestore(), root, 'riwayat_akun', 'history-protected'), {
+      aksi: 'reset_password', olehUid: 'admin',
+    });
+  });
+  const adminDb = env.authenticatedContext('admin').firestore();
+  const rtDb = env.authenticatedContext('rt').firestore();
+  await assertFails(setDoc(doc(adminDb, root, 'permintaan_akun', 'request-forged'), {
+    wargaId: 'warga-a', rtId: 'rt-1', status: 'disetujui',
+  }));
+  await assertFails(updateDoc(doc(rtDb, root, 'permintaan_akun', 'request-protected'), {
+    status: 'disetujui',
+  }));
+  await assertFails(setDoc(doc(adminDb, root, 'riwayat_akun', 'history-forged'), {
+    aksi: 'reset_password', olehUid: 'admin',
+  }));
+});
