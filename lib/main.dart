@@ -481,7 +481,7 @@ class PhotoService {
     }
   }
 
-  static Future<String> upload(Uint8List bytes, String moduleKey, {String? docId}) async {
+  static Future<Map<String, dynamic>> sendSosNotification(String sosId) =>\n      _request({'action': 'sendSosNotification', 'sosId': sosId});\n\n  static Future<String> upload(Uint8List bytes, String moduleKey, {String? docId}) async {
     if (bytes.lengthInBytes > maxBytes) throw Exception('Foto melebihi batas 1 MB.');
     final result = await _request({
       'action': 'upload',
@@ -1755,9 +1755,18 @@ class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
         'targetRoles': ['ketua_rt','ketua_rw','perangkat_kawil','admin','owner'],
         'status': 'baru', 'createdAt': FieldValue.serverTimestamp(),
       });
-      if (mounted) showMessage(context, pos == null
-        ? 'SOS tercatat. GPS belum tersedia; petugas perlu menghubungi pelapor.'
-        : 'SOS berhasil dikirim beserta lokasi GPS.');
+      var pushError = '';
+      try {
+        await PhotoService.sendSosNotification(sos.id);
+      } catch (e) {
+        // Laporan SOS sudah tersimpan. Kegagalan push tidak boleh membatalkan SOS.
+        pushError = e.toString();
+      }
+      if (mounted) showMessage(context, pushError.isNotEmpty
+        ? 'SOS tersimpan, tetapi notifikasi push petugas gagal dikirim. Periksa koneksi/API.'
+        : pos == null
+          ? 'SOS tercatat dan notifikasi petugas diproses. GPS belum tersedia; petugas perlu menghubungi pelapor.'
+          : 'SOS berhasil dikirim beserta lokasi GPS dan notifikasi petugas.');
     } catch (e) {
       if (mounted) showMessage(context, 'SOS gagal dikirim: $e');
     } finally {
