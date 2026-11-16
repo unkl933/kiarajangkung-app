@@ -37,6 +37,14 @@ service cloud.firestore {
         request.resource.data.get('scheduleId', '') is string &&
         isRondaMember(request.resource.data.scheduleId);
     }
+    function canReadRondaAttendance(data) {
+      return signedIn() && (
+        isOwnerOrAdmin() ||
+        data.get('uid', '') == request.auth.uid ||
+        (data.get('scheduleId', '') is string && data.get('scheduleId', '').size() > 0 &&
+          isRondaMember(data.get('scheduleId', '')))
+      );
+    }
     function sensusPath(docId) {
       return /databases/$(database)/documents/kampung/kiarajangkung/sensus/$(docId);
     }
@@ -386,7 +394,7 @@ match /kampung/kiarajangkung/kegiatan_rt/{kegiatanId} {
   allow create: if s2Staff() && s2InArea(request.resource.data) &&
     request.resource.data.dibuatOlehUid == request.auth.uid;
   allow read: if s2SignedIn() && (
-    resource.data.status == 'terbit' || s2InArea(resource.data)
+    resource.data.get('status', '') in ['terbit', 'aktif'] || s2InArea(resource.data)
   );
   allow update: if s2InArea(resource.data) && (s2Admin() || s2Staff()) &&
     request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -439,7 +447,9 @@ match /kampung/kiarajangkung/laporan_sos/{sosId} {
                (s3HasRole('perangkat_kawil') && resource.data.get('kawilId', '') == s3Profile().get('kawilId', '')))))
           : module == 'sensus'
             ? (isOwnerOrAdmin() || ownsSensus(docId))
-            : (module in ['riwayat_perubahan', 'sensus_nik_index'] ? isOwnerOrAdmin() : signedIn());
+            : module == 'ronda_absensi'
+              ? canReadRondaAttendance(resource.data)
+              : (module in ['riwayat_perubahan', 'sensus_nik_index'] ? isOwnerOrAdmin() : signedIn());
 
       allow create: if module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan']
         ? false
