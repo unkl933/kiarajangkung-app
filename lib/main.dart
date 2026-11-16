@@ -1222,7 +1222,7 @@ class _HomePageState extends State<HomePage> {
         : <String>{};
     final primaryRole = (widget.profile['role'] ?? widget.role).toString().toLowerCase();
     if (primaryRole.isNotEmpty) roles.add(primaryRole);
-    return roles.contains('admin') || roles.contains('ketua_rt');
+    return roles.contains('owner') || roles.contains('admin') || roles.contains('ketua_rt');
   }
   bool get isAccountRequestAdmin {
     final roles = (widget.profile['roles'] is List)
@@ -1230,7 +1230,7 @@ class _HomePageState extends State<HomePage> {
         : <String>{};
     final primaryRole = (widget.profile['role'] ?? widget.role).toString().toLowerCase();
     if (primaryRole.isNotEmpty) roles.add(primaryRole);
-    return roles.contains('admin');
+    return roles.contains('owner') || roles.contains('admin');
   }
 
   @override
