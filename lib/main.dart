@@ -883,6 +883,86 @@ const modules = <ModuleInfo>[
   ModuleInfo('panel_kawil', 'Dashboard Kepala Wilayah', 'Pemantauan RW, RT, data warga, surat dan pengaduan wilayah', Icons.dashboard_customize_outlined),
 ];
 
+class DashboardServiceSearch extends StatefulWidget {
+  final bool isAdmin;
+  final Set<String> roles;
+  final ValueChanged<String> onOpen;
+  const DashboardServiceSearch({super.key, required this.isAdmin, required this.roles, required this.onOpen});
+  @override
+  State<DashboardServiceSearch> createState() => _DashboardServiceSearchState();
+}
+
+class _DashboardServiceSearchState extends State<DashboardServiceSearch> {
+  final TextEditingController _controller = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() { _controller.dispose(); super.dispose(); }
+
+  List<ModuleInfo> get _availableModules => modules.where((m) {
+    if (m.privateData && !widget.isAdmin) return false;
+    if (m.keyName == 'kontak_darurat' && !widget.isAdmin) return false;
+    if (m.keyName == 'panel_kawil' && !widget.roles.contains('perangkat_kawil')) return false;
+    return true;
+  }).toList();
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _query.trim().toLowerCase();
+    final matches = q.isEmpty ? <ModuleInfo>[] : _availableModules.where((m) =>
+      m.title.toLowerCase().contains(q) || m.subtitle.toLowerCase().contains(q) ||
+      m.keyName.replaceAll('_', ' ').contains(q)).take(7).toList();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      TextField(
+        controller: _controller,
+        textInputAction: TextInputAction.search,
+        onChanged: (value) => setState(() => _query = value),
+        onSubmitted: (_) { if (matches.length == 1) widget.onOpen(matches.first.keyName); },
+        decoration: InputDecoration(
+          hintText: 'Cari layanan, informasi, atau menu...',
+          prefixIcon: const Icon(Icons.search_rounded),
+          suffixIcon: _query.isEmpty ? null : IconButton(
+            tooltip: 'Hapus pencarian',
+            onPressed: () { _controller.clear(); setState(() => _query = ''); },
+            icon: const Icon(Icons.close_rounded),
+          ),
+        ),
+      ),
+      if (q.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFEDEFF1))),
+          child: matches.isEmpty
+            ? const Padding(padding: EdgeInsets.all(14), child: Text('Layanan yang cocok belum ditemukan.',
+                style: TextStyle(color: Color(0xFF777D86), fontSize: 13)))
+            : Column(children: [
+                for (var i = 0; i < matches.length; i++) ...[
+                  ListTile(
+                    dense: true,
+                    leading: CircleAvatar(radius: 17, backgroundColor: const Color(0xFFFCEAEA),
+                      child: Icon(matches[i].icon, color: const Color(0xFFC94B4B), size: 18)),
+                    title: Text(matches[i].title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                    subtitle: Text(matches[i].subtitle, maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11)),
+                    trailing: const Icon(Icons.chevron_right, size: 19),
+                    onTap: () {
+                      FocusScope.of(context).unfocus();
+                      final key = matches[i].keyName;
+                      _controller.clear();
+                      setState(() => _query = '');
+                      widget.onOpen(key);
+                    },
+                  ),
+                  if (i != matches.length - 1) const Divider(height: 1, indent: 58),
+                ],
+              ]),
+        ),
+      ],
+    ]);
+  }
+}
+
 class HomePage extends StatefulWidget {
   final User user;
   final Map<String, dynamic> profile;
@@ -940,7 +1020,13 @@ class _HomePageState extends State<HomePage> {
             tooltip: 'Pengaturan akun',
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => Navigator.push(context, MaterialPageRoute(
-              builder: (_) => ProfilePage(user: widget.user, profile: widget.profile, isAdmin: isAdmin),
+              builder: (_) => Scaffold(
+                backgroundColor: const Color(0xFFF8F6F6),
+                appBar: AppBar(title: const Text('Pengaturan Akun')),
+                body: SafeArea(
+                  child: ProfilePage(user: widget.user, profile: widget.profile, isAdmin: isAdmin),
+                ),
+              ),
             )),
           ),
         ],
@@ -1052,24 +1138,10 @@ class _HomePageState extends State<HomePage> {
           ]),
         ),
         const SizedBox(height: 14),
-        TextField(
-          textInputAction: TextInputAction.search,
-          onSubmitted: (value) {
-            final q = value.trim().toLowerCase();
-            if (q.isEmpty) return;
-            final matches = modules.where((m) => m.title.toLowerCase().contains(q) || m.subtitle.toLowerCase().contains(q)).toList();
-            if (matches.isNotEmpty) {
-              openModule(matches.first.keyName);
-            } else {
-              showMessage(context, 'Menu atau layanan tidak ditemukan.');
-            }
-          },
-          decoration: InputDecoration(
-            hintText: 'Cari layanan, informasi, atau menu...',
-            prefixIcon: const Icon(Icons.search_rounded),
-            suffixIcon: Container(margin: const EdgeInsets.all(6), decoration: BoxDecoration(color: const Color(0xFFC94B4B), borderRadius: BorderRadius.circular(11)),
-              child: const Icon(Icons.tune_rounded, color: Colors.white, size: 19)),
-          ),
+        DashboardServiceSearch(
+          isAdmin: isAdmin,
+          roles: roles,
+          onOpen: openModule,
         ),
         const SizedBox(height: 12),
         const DashboardAnnouncements(),
@@ -3387,8 +3459,13 @@ class _KawilResidentsPageState extends State<KawilResidentsPage> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
+      backgroundColor: Colors.white,
+      clipBehavior: Clip.antiAlias,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
       builder: (ctx) => SafeArea(
-        child: Padding(
+        child: Material(
+          color: Colors.white,
+          child: Padding(
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -3434,6 +3511,7 @@ class _KawilResidentsPageState extends State<KawilResidentsPage> {
                 label: const Text('Minta perbaikan'),
               ),
             ],
+          ),
           ),
         ),
       ),
