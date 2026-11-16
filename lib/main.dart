@@ -5644,59 +5644,9 @@ Future<void> showRecordForm(
                           payload['createdBy'] = Db.auth.currentUser?.uid;
                           DocumentReference<Map<String, dynamic>> savedDoc;
                           if (module.keyName == 'sensus') {
-                            savedDoc = Db.module('sensus').doc();
-                            final nik = (payload['nik'] ?? '').toString();
-                            final allSensus = await Db.module('sensus').get();
-                            final duplicateDocs = allSensus.docs.where((d) => normalizeNik((d.data()['nik'] ?? '').toString()) == nik).toList();
-                            if (duplicateDocs.isNotEmpty) throw Exception('NIK sudah terdaftar atas nama ${(duplicateDocs.first.data()['nama'] ?? 'warga lain')}. Gunakan data Sensus yang sudah ada.');
-                            final indexRef = Db.firestore.collection('kampung').doc('kiarajangkung').collection('sensus_nik_index').doc(nik);
-                            await Db.firestore.runTransaction((tx) async {
-                              final indexSnap = await tx.get(indexRef);
-                              if (indexSnap.exists) throw Exception('NIK sudah digunakan oleh data warga lain.');
-                              payload['wargaId'] = savedDoc.id;
-                              payload['roles'] = isOwner ? <String>{'warga', ...selectedRoles}.toList() : <String>['warga'];
-                              tx.set(savedDoc, payload);
-                              tx.set(indexRef, {'nik': nik, 'wargaId': savedDoc.id, 'createdAt': FieldValue.serverTimestamp()});
-                            });
-                          } else {
-                            savedDoc = await Db.module(module.keyName).add(payload);
-                          }
-                          if (module.keyName == 'sensus') {
-                            final assignedRoles = isOwner ? <String>{'warga', ...selectedRoles}.toList() : <String>['warga'];
-                            try {
-                              final account = await PhotoService.provisionResident(
-                                nik: (payload['nik'] ?? '').toString().trim(), nama: title.text.trim(),
-                                tanggalLahir: (payload['tanggalLahir'] ?? '').toString().trim(),
-                                telepon: (payload['telepon'] ?? '').toString(), alamat: (payload['alamat'] ?? '').toString(), rt: (payload['rt'] ?? '').toString(),
-                                rw: (payload['rw'] ?? '').toString(), kawil: (payload['kawil'] ?? '').toString(),
-                                kawilId: (payload['kawilId'] ?? '').toString(), rwId: (payload['rwId'] ?? '').toString(), rtId: (payload['rtId'] ?? '').toString(),
-                                wargaId: savedDoc.id, roles: assignedRoles,
-                              );
-                              await savedDoc.update({'accountUid': (account['uid'] ?? '').toString(), 'akunStatus': 'Aktif'});
-                              if (context.mounted) showMessage(context, 'Data Sensus tersimpan dan akun warga berhasil dibuat.');
-                            } catch (accountError) {
-                              await savedDoc.update({'akunStatus': 'Gagal dibuat'});
-                              if (context.mounted) showMessage(context, 'Data Sensus tersimpan, tetapi akun belum berhasil dibuat: $accountError');
-                            }
-                            await writeWargaAudit(wargaId: savedDoc.id, modul: 'sensus', aksi: 'data warga ditambahkan', peran: 'identitas', namaWarga: title.text.trim(), recordId: savedDoc.id);
-                          }
-                          if (module.keyName == 'perangkat' && selectedTitleResident != null) {
-                            await writeWargaAudit(wargaId: (selectedTitleResident!['wargaId'] ?? '').toString(), modul: module.keyName, aksi: 'ditambahkan', peran: (payload['jabatan'] ?? '').toString(), namaWarga: (selectedTitleResident!['nama'] ?? '').toString(), recordId: savedDoc.id);
-                          }
-                          for (final entry in selectedResidents.entries) {
-                            await writeWargaAudit(wargaId: (entry.value['wargaId'] ?? '').toString(), modul: module.keyName, aksi: 'ditambahkan', peran: entry.key, namaWarga: (entry.value['nama'] ?? '').toString(), recordId: savedDoc.id);
-                          }
-                          for (final resident in selectedOrganizationMembers) {
-                            await writeWargaAudit(wargaId: (resident['wargaId'] ?? '').toString(), modul: module.keyName, aksi: 'ditambahkan sebagai anggota', peran: 'anggota', namaWarga: (resident['nama'] ?? '').toString(), recordId: savedDoc.id);
-                          }
-                        } else {
-                          final recordRef = Db.module(module.keyName).doc(docId);
-                          if (module.keyName == 'sensus') {
                             final assignedRoles = isOwner ? <String>{'warga', ...selectedRoles}.toList() : <String>['warga'];
                             final hasOfficialRole = assignedRoles.any((role) => role != 'warga');
                             if (hasOfficialRole) {
-                              // Akun jabatan yang secara eksplisit ditetapkan Owner tetap
-                              // dibuat melalui provisioning khusus. Akun warga biasa menunggu persetujuan.
                               try {
                                 final account = await PhotoService.provisionResident(
                                   nik: (payload['nik'] ?? '').toString().trim(), nama: title.text.trim(),
@@ -5718,6 +5668,41 @@ Future<void> showRecordForm(
                             }
                             await writeWargaAudit(wargaId: savedDoc.id, modul: 'sensus', aksi: 'data warga ditambahkan', peran: 'identitas', namaWarga: title.text.trim(), recordId: savedDoc.id);
                           }
+                          final recordRef = Db.module(module.keyName).doc(docId);
+                          if (module.keyName == 'sensus') {
+                            final nik = (payload['nik'] ?? '').toString();
+                            final oldNik = normalizeNik((initial?['nik'] ?? '').toString());
+                            final allSensus = await Db.module('sensus').get();
+                            if (allSensus.docs.any((d) => d.id != docId && normalizeNik((d.data()['nik'] ?? '').toString()) == nik)) throw Exception('NIK sudah dipakai oleh warga lain.');
+                            final newIndexRef = Db.firestore.collection('kampung').doc('kiarajangkung').collection('sensus_nik_index').doc(nik);
+                            final oldIndexRef = oldNik.isEmpty ? null : Db.firestore.collection('kampung').doc('kiarajangkung').collection('sensus_nik_index').doc(oldNik);
+                            await Db.firestore.runTransaction((tx) async {
+                              final newIndex = await tx.get(newIndexRef);
+                              final oldIndex = oldIndexRef != null && oldNik != nik ? await tx.get(oldIndexRef) : null;
+                              if (newIndex.exists && (newIndex.data()?['wargaId'] ?? '') != docId) throw Exception('NIK sudah digunakan oleh warga lain.');
+                              tx.update(recordRef, payload);
+                              tx.set(newIndexRef, {'nik': nik, 'wargaId': docId, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+                              if (oldIndexRef != null && oldNik != nik && oldIndex != null && oldIndex.exists && (oldIndex.data()?['wargaId'] ?? '') == docId) tx.delete(oldIndexRef);
+                            });
+                            final syncedData = <String, dynamic>{...?initial, ...payload, 'accountUid': initial?['accountUid'] ?? ''};
+                            await syncAccountProfileFromSensus(docId, syncedData);
+                            final accountUid = (initial?['accountUid'] ?? '').toString();
+                            if (payload['statusWarga'] == 'Arsip' && accountUid.isNotEmpty) {
+                              final accountSnap = await Db.user(accountUid).get();
+                              final accountData = accountSnap.data() ?? <String, dynamic>{};
+                              if ((accountData['status'] ?? 'Aktif') == 'Aktif') {
+                                await recordRef.update({'statusAkunSebelumArsip': 'Aktif'});
+                                await updateUserProfileIfExists(accountUid, {'status': 'Nonaktif', 'updatedAt': FieldValue.serverTimestamp()});
+                              }
+                            } else if (payload['statusWarga'] == 'Aktif' && initial?['statusWarga'] == 'Arsip' && accountUid.isNotEmpty && initial?['statusAkunSebelumArsip'] == 'Aktif') {
+                              await updateUserProfileIfExists(accountUid, {'status': 'Aktif', 'updatedAt': FieldValue.serverTimestamp()});
+                            }
+                            await writeWargaAudit(wargaId: docId, modul: 'sensus', aksi: payload['statusWarga'] == 'Arsip' && initial?['statusWarga'] != 'Arsip' ? 'warga diarsipkan' : 'data identitas diperbarui', peran: 'identitas', namaWarga: (payload['nama'] ?? '').toString(), recordId: docId);
+                          } else {
+                            await recordRef.update(payload);
+                          }
+                          final oldPhoto = (initial?['fotoUrl'] ?? initial?['foto'] ?? initial?['imageUrl'] ?? '').toString();
+                          if (oldPhoto.isNotEmpty && oldPhoto != finalPhotoUrl) await PhotoService.deleteIfOwned(oldPhoto);
                           if (module.keyName == 'perangkat' && selectedTitleResident != null) {
                             await writeWargaAudit(wargaId: (selectedTitleResident!['wargaId'] ?? '').toString(), modul: module.keyName, aksi: 'diperbarui', peran: (payload['jabatan'] ?? '').toString(), namaWarga: (selectedTitleResident!['nama'] ?? '').toString(), recordId: docId);
                           }
