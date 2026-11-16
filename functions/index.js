@@ -137,9 +137,9 @@ exports.sosNotificationCreated = onDocumentCreated(
     if (!claimed) return;
 
     try {
-      const targetRoles = Array.isArray(data.targetRoles)
-        ? data.targetRoles.map(x => String(x).toLowerCase())
-        : ['ketua_rt', 'ketua_rw', 'perangkat_kawil', 'admin', 'owner'];
+      // Daftar penerima ditetapkan server. Jangan mempercayai targetRoles
+      // dari dokumen yang dibuat warga karena dapat dipakai untuk broadcast massal.
+      const targetRoles = ['ketua_rt', 'ketua_rw', 'perangkat_kawil', 'admin', 'owner'];
       const usersSnap = await db.collection('users').get();
       const tokens = new Set();
       const targetArea = ['kawilId', 'rwId', 'rtId'];
@@ -147,25 +147,25 @@ exports.sosNotificationCreated = onDocumentCreated(
 
       for (const userDoc of usersSnap.docs) {
         const user = userDoc.data() || {};
-        const roles = Array.isArray(user.roles)
-          ? user.roles.map(x => String(x).toLowerCase())
-          : [String(user.role || '').toLowerCase()];
-        if (!roles.some(role => targetRoles.includes(role))) continue;
+        // Firestore Rules menerima role utama maupun roles; gabungkan keduanya
+        // agar perilaku notifikasi konsisten untuk akun multi-role.
+        const roles = new Set([
+          String(user.role || '').toLowerCase(),
+          ...(Array.isArray(user.roles) ? user.roles.map(x => String(x).toLowerCase()) : [])
+        ].filter(Boolean));
+        if (![...roles].some(role => targetRoles.includes(role))) continue;
 
-        const isGlobalManager = roles.includes('admin') || roles.includes('owner');
-        const requiredAreaKeys = roles.includes('ketua_rt')
-          ? targetArea
-          : roles.includes('ketua_rw')
-            ? ['kawilId', 'rwId']
-            : roles.includes('perangkat_kawil')
-              ? ['kawilId']
-              : [];
-        const sameArea = isGlobalManager || requiredAreaKeys.every(key => {
+        const isGlobalManager = roles.has('admin') || roles.has('owner');
+        const matchesArea = (keys) => keys.every(key => {
           const requested = String(data[key] || '').trim();
-          if (!requested) return true;
-          return String(user[key] || '').trim() === requested;
+          const assigned = String(user[key] || '').trim();
+          return requested.length > 0 && assigned.length > 0 && assigned === requested;
         });
-        if (!sameArea) continue;
+        const hasRegionalRoleInArea =
+          (roles.has('ketua_rt') && matchesArea(targetArea)) ||
+          (roles.has('ketua_rw') && matchesArea(['kawilId', 'rwId'])) ||
+          (roles.has('perangkat_kawil') && matchesArea(['kawilId']));
+        if (!isGlobalManager && !hasRegionalRoleInArea) continue;
 
         const userTokens = Array.isArray(user.fcmTokens) ? user.fcmTokens : [];
         if (userTokens.length) matchedUsers++;
