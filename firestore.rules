@@ -395,16 +395,37 @@ match /kampung/kiarajangkung/pelayanan_surat/{suratId} {
   allow delete: if s2Admin();
 }
 
+function s2CanUpdateComplaint() {
+  let changed = request.resource.data.diff(resource.data).affectedKeys();
+  let nextStatus = request.resource.data.get('status', resource.data.get('status', ''));
+  let currentStatus = resource.data.get('status', '');
+  let allowedFields = changed.hasOnly([
+    'status', 'tanggapan', 'catatanPetugas', 'updatedAt', 'riwayatStatus',
+    'catatanPenyelesaian', 'diselesaikanOlehUid', 'diselesaikanOlehNama', 'diselesaikanPada'
+  ]);
+  let rtAdvance = s2HasRole('ketua_rt') &&
+    currentStatus == 'menunggu_validasi_rt' && nextStatus in ['menunggu_validasi_rw', 'ditolak'];
+  let rwAdvance = s2HasRole('ketua_rw') &&
+    currentStatus == 'menunggu_validasi_rw' && nextStatus in ['menunggu_validasi_kawil', 'ditolak'];
+  let kawilAdvance = s2HasRole('perangkat_kawil') && (
+    (currentStatus == 'menunggu_validasi_kawil' && nextStatus in ['terverifikasi', 'ditolak']) ||
+    (currentStatus == 'terverifikasi' && nextStatus == 'ditindaklanjuti') ||
+    (currentStatus == 'ditindaklanjuti' && nextStatus == 'selesai' &&
+      request.resource.data.get('catatanPenyelesaian', '') is string &&
+      request.resource.data.get('catatanPenyelesaian', '').size() > 0 &&
+      request.resource.data.get('diselesaikanOlehUid', '') == request.auth.uid)
+  );
+  return s2SignedIn() && s2InArea(resource.data) && allowedFields &&
+    (s2Admin() || rtAdvance || rwAdvance || kawilAdvance);
+}
+
 match /kampung/kiarajangkung/pengaduan/{pengaduanId} {
-  allow create: if s2OwnScopedCreate() && request.resource.data.status == 'baru';
+  allow create: if s2OwnScopedCreate() &&
+    request.resource.data.get('status', '') == 'menunggu_validasi_rt';
   allow read: if s2SignedIn() && (
     resource.data.pemohonUid == request.auth.uid || s2InArea(resource.data)
   );
-  allow update: if s2InArea(resource.data) &&
-    request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-      'status', 'tanggapan', 'catatanPetugas', 'updatedAt', 'riwayatStatus'
-    ]) && (s2Admin() || s2Staff()) &&
-    request.resource.data.status in ['ditindaklanjuti', 'selesai', 'ditolak'];
+  allow update: if s2CanUpdateComplaint();
   allow delete: if s2Admin();
 }
 
