@@ -395,6 +395,13 @@ match /kampung/kiarajangkung/pelayanan_surat/{suratId} {
   allow delete: if s2Admin();
 }
 
+function s2ComplaintInitialHistory() {
+  let history = request.resource.data.get('riwayatStatus', []);
+  return history is list && history.size() == 1 &&
+    history[0].get('olehUid', '') == request.auth.uid &&
+    history[0].get('status', '') == 'menunggu_validasi_rt';
+}
+
 function s2ComplaintHistoryAppended() {
   let oldHistory = resource.data.get('riwayatStatus', []);
   let newHistory = request.resource.data.get('riwayatStatus', []);
@@ -462,7 +469,8 @@ function s2CanUpdateComplaint() {
 
 match /kampung/kiarajangkung/pengaduan/{pengaduanId} {
   allow create: if s2OwnScopedCreate() &&
-    request.resource.data.get('status', '') == 'menunggu_validasi_rt';
+    request.resource.data.get('status', '') == 'menunggu_validasi_rt' &&
+    s2ComplaintInitialHistory();
   allow read: if s2SignedIn() && (
     resource.data.pemohonUid == request.auth.uid || s2InArea(resource.data)
   );
