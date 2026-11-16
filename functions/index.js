@@ -228,3 +228,121 @@ exports.sosNotificationCreated = onDocumentCreated(
     }
   }
 );
+
+// Notifikasi pengaduan berjenjang. Dokumen inbox dibuat per pengguna
+// dengan ID berbasis event agar retry Cloud Functions tidak menggandakan pesan.
+function roleSet(user) {
+  return new Set([
+    String(user.role || '').toLowerCase(),
+    ...(Array.isArray(user.roles) ? user.roles.map(x => String(x).toLowerCase()) : [])
+  ].filter(Boolean));
+}
+
+function complaintRecipients(users, complaint, nextStatus, previousStatus) {
+  const recipients = new Map();
+  const add = (doc, user) => recipients.set(doc.id, { ref: doc.ref, user });
+  const same = key => String(complaint[key] || '').trim();
+  const hasRoleInArea = (user, role, keys) => {
+    const roles = roleSet(user);
+    return roles.has(role) && keys.every(key => same(key) && String(user[key] || '').trim() === same(key));
+  };
+  const stage = nextStatus === 'menunggu_validasi_rt' && !previousStatus ? 'rt' :
+    nextStatus === 'menunggu_validasi_rw' ? 'rw' :
+    nextStatus === 'menunggu_validasi_kawil' ? 'kawil' : '';
+  if (stage) {
+    for (const doc of users.docs) {
+      const user = doc.data() || {};
+      const match = stage === 'rt'
+        ? hasRoleInArea(user, 'ketua_rt', ['kawilId', 'rwId', 'rtId'])
+        : stage === 'rw'
+          ? hasRoleInArea(user, 'ketua_rw', ['kawilId', 'rwId'])
+          : hasRoleInArea(user, 'perangkat_kawil', ['kawilId']);
+      if (match) add(doc, user);
+    }
+  }
+  if (previousStatus && nextStatus !== previousStatus) {
+    const authorUid = String(complaint.pemohonUid || '');
+    const author = users.docs.find(doc => doc.id === authorUid);
+    if (author && ['menunggu_validasi_rw', 'menunggu_validasi_kawil', 'terverifikasi',
+      'ditindaklanjuti', 'selesai', 'ditolak'].includes(nextStatus)) {
+      add(author, author.data() || {});
+    }
+  }
+  return [...recipients.entries()].map(([uid, value]) => ({ uid, ...value }));
+}
+
+exports.complaintNotificationChanged = onDocumentWritten(
+  'kampung/kiarajangkung/pengaduan/{complaintId}',
+  async event => {
+    const before = event.data?.before?.data() || null;
+    const after = event.data?.after?.data() || null;
+    if (!after) return;
+    const nextStatus = String(after.status || '');
+    const previousStatus = String(before?.status || '');
+    if (before && nextStatus === previousStatus) return;
+    const users = await db.collection('users').get();
+    const recipients = complaintRecipients(users, after, nextStatus, previousStatus);
+    if (!recipients.length) return;
+
+    const messages = {
+      menunggu_validasi_rt: ['Pengaduan Baru', 'Ada pengaduan baru di wilayah Anda yang menunggu pemeriksaan Ketua RT.'],
+      menunggu_validasi_rw: ['Pengaduan Diteruskan ke RW', 'Pengaduan telah divalidasi Ketua RT dan menunggu pemeriksaan Ketua RW.'],
+      menunggu_validasi_kawil: ['Pengaduan Diteruskan ke Kawil', 'Pengaduan telah divalidasi Ketua RW dan menunggu pemeriksaan Kawil.'],
+      terverifikasi: ['Pengaduan Terverifikasi', 'Pengaduan Anda telah melewati validasi berjenjang.'],
+      ditindaklanjuti: ['Pengaduan Ditindaklanjuti', 'Pengaduan Anda mulai ditangani oleh Kawil.'],
+      selesai: ['Pengaduan Selesai', 'Pengaduan Anda telah diselesaikan. Buka aplikasi untuk melihat catatan penyelesaian.'],
+      ditolak: ['Pengaduan Tidak Dapat Dilanjutkan', 'Pengaduan Anda memerlukan perhatian. Buka aplikasi untuk melihat keterangannya.']
+    };
+    const [title, body] = messages[nextStatus] || ['Pembaruan Pengaduan', 'Ada pembaruan pada pengaduan Anda.'];
+    const invalidByUid = new Map();
+    for (const recipient of recipients) {
+      const inboxRef = recipient.ref.collection('notifikasi').doc(String(event.id).replace(/[^a-zA-Z0-9_-]/g, '_'));
+      const shouldSend = await db.runTransaction(async tx => {
+        const existing = await tx.get(inboxRef);
+        if (existing.exists) return false;
+        tx.create(inboxRef, {
+          kategori: 'pengaduan',
+          jenis: 'pengaduan',
+          judul: title,
+          pesan: body,
+          referensiJenis: 'pengaduan',
+          referensiId: event.params.complaintId,
+          statusPengaduan: nextStatus,
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        return true;
+      });
+      if (!shouldSend) continue;
+      const tokens = Array.isArray(recipient.user.fcmTokens)
+        ? [...new Set(recipient.user.fcmTokens.filter(t => typeof t === 'string' && t.trim()))]
+        : [];
+      if (!tokens.length) continue;
+      const result = await admin.messaging().sendEachForMulticast({
+        tokens,
+        notification: { title, body },
+        data: {
+          type: 'pengaduan',
+          screen: 'pelayanan',
+          tab: 'pengaduan',
+          referensiId: event.params.complaintId
+        },
+        android: { priority: 'high' }
+      });
+      const invalid = [];
+      result.responses.forEach((response, index) => {
+        if (!response.success && [
+          'messaging/invalid-registration-token',
+          'messaging/registration-token-not-registered'
+        ].includes(response.error?.code)) invalid.push(tokens[index]);
+      });
+      if (invalid.length) invalidByUid.set(recipient.uid, invalid);
+    }
+    for (const [uid, invalid] of invalidByUid) {
+      const userRef = db.collection('users').doc(uid);
+      const current = (await userRef.get()).data()?.fcmTokens || [];
+      await userRef.update({ fcmTokens: current.filter(token => !invalid.includes(token)) });
+    }
+  }
+);
+
