@@ -327,7 +327,7 @@ function s6OwnSosNotificationCreate() {
     // Penulisan seluruh permintaan dan riwayat dilakukan oleh backend Apps Script.
     match /kampung/kiarajangkung/permintaan_akun/{requestId} {
       allow read: if signedIn() && (
-        isAdmin() ||
+        isOwnerOrAdmin() ||
         (hasRole('ketua_rt') &&
           resource.data.get('rtId', '') == userData().get('rtId', ''))
       );
