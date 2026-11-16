@@ -112,3 +112,98 @@ exports.rondaReminders = onSchedule({ schedule: 'every 5 minutes', timeZone: 'As
     }
   }
 });
+
+
+// Kirim push notification untuk laporan SOS kepada pengurus sesuai role dan wilayah.
+exports.sosNotificationCreated = onDocumentCreated(
+  'kampung/kiarajangkung/notifikasi/{notificationId}',
+  async event => {
+    const snap = event.data;
+    if (!snap) return;
+    const data = snap.data() || {};
+    if (String(data.jenis || '').toLowerCase() !== 'sos') return;
+
+    const ref = snap.ref;
+    const claimed = await db.runTransaction(async tx => {
+      const current = await tx.get(ref);
+      const status = String(current.data()?.pushStatus || '');
+      if (status === 'terkirim' || status === 'memproses') return false;
+      tx.update(ref, {
+        pushStatus: 'memproses',
+        pushAttemptAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      return true;
+    });
+    if (!claimed) return;
+
+    try {
+      const targetRoles = Array.isArray(data.targetRoles)
+        ? data.targetRoles.map(x => String(x).toLowerCase())
+        : ['ketua_rt', 'ketua_rw', 'perangkat_kawil', 'admin', 'owner'];
+      const usersSnap = await db.collection('users').get();
+      const tokens = new Set();
+      const targetArea = ['kawilId', 'rwId', 'rtId'];
+      let matchedUsers = 0;
+
+      for (const userDoc of usersSnap.docs) {
+        const user = userDoc.data() || {};
+        const roles = Array.isArray(user.roles)
+          ? user.roles.map(x => String(x).toLowerCase())
+          : [String(user.role || '').toLowerCase()];
+        if (!roles.some(role => targetRoles.includes(role))) continue;
+
+        const sameArea = targetArea.every(key => {
+          const requested = String(data[key] || '').trim();
+          const actual = String(user[key] || '').trim();
+          return !requested || !actual || requested === actual;
+        });
+        if (!sameArea) continue;
+
+        const userTokens = Array.isArray(user.fcmTokens) ? user.fcmTokens : [];
+        if (userTokens.length) matchedUsers++;
+        userTokens.forEach(token => {
+          if (typeof token === 'string' && token.trim()) tokens.add(token.trim());
+        });
+      }
+
+      const tokenList = [...tokens];
+      let sent = 0;
+      let failed = 0;
+      for (let i = 0; i < tokenList.length; i += 500) {
+        const batch = tokenList.slice(i, i + 500);
+        const result = await admin.messaging().sendEachForMulticast({
+          tokens: batch,
+          notification: {
+            title: String(data.judul || 'SOS DARURAT'),
+            body: String(data.pesan || 'Ada warga yang membutuhkan bantuan segera.')
+          },
+          data: {
+            type: 'sos',
+            screen: 'darurat',
+            referensiId: String(data.referensiId || '')
+          },
+          android: { priority: 'high' },
+          apns: { payload: { aps: { sound: 'default', contentAvailable: true } } }
+        });
+        sent += result.successCount;
+        failed += result.failureCount;
+      }
+
+      await ref.update({
+        pushStatus: 'terkirim',
+        pushJumlahToken: tokenList.length,
+        pushBerhasil: sent,
+        pushGagal: failed,
+        pushJumlahAkun: matchedUsers,
+        pushSentAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    } catch (error) {
+      await ref.update({
+        pushStatus: 'gagal',
+        pushError: String(error?.message || error).slice(0, 500),
+        pushFailedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      throw error;
+    }
+  }
+);
