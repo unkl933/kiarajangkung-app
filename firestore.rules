@@ -1,0 +1,533 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function userPath(uid) { return /databases/$(database)/documents/users/$(uid); }
+    function migrationConfigPath() { return /databases/$(database)/documents/system_config/sensus_migration; }
+    function residentEditsLocked() {
+      return exists(migrationConfigPath()) &&
+        get(migrationConfigPath()).data.get('lockResidentEdits', false) == true;
+    }
+    function hasUserProfile() { return signedIn() && exists(userPath(request.auth.uid)); }
+    function userData() { return get(userPath(request.auth.uid)).data; }
+    function hasRole(roleName) {
+      return hasUserProfile() && (
+        userData().get('role', '') == roleName ||
+        userData().get('roles', []).hasAny([roleName])
+      );
+    }
+    function isOwner() { return hasRole('owner'); }
+    function isAdmin() { return hasRole('admin'); }
+    function isOwnerOrAdmin() { return isOwner() || isAdmin(); }
+    function ownsSensus(docId) {
+      return hasUserProfile() && (
+        userData().get('wargaId', '') == docId ||
+        resource.data.get('accountUid', '') == request.auth.uid
+      );
+    }
+    function rondaSchedulePath(scheduleId) {
+      return /databases/$(database)/documents/kampung/kiarajangkung/ronda/$(scheduleId);
+    }
+    function isRondaMember(scheduleId) {
+      return signedIn() && exists(rondaSchedulePath(scheduleId)) &&
+        get(rondaSchedulePath(scheduleId)).data.get('anggotaUid', []).hasAny([request.auth.uid]);
+    }
+    function selfRondaRecord() {
+      return signedIn() && request.resource.data.get('uid', '') == request.auth.uid &&
+        request.resource.data.get('scheduleId', '') is string &&
+        isRondaMember(request.resource.data.scheduleId);
+    }
+    function sensusPath(docId) {
+      return /databases/$(database)/documents/kampung/kiarajangkung/sensus/$(docId);
+    }
+    function sensusNikIndexPath(nik) {
+      return /databases/$(database)/documents/kampung/kiarajangkung/sensus_nik_index/$(nik);
+    }
+    function hasMatchingSensusNikIndex(docId) {
+      return request.resource.data.get('nik', '') is string &&
+        request.resource.data.nik.matches('^[0-9]{16}$') &&
+        request.resource.data.get('wargaId', '') == docId &&
+        existsAfter(sensusNikIndexPath(request.resource.data.nik)) &&
+        getAfter(sensusNikIndexPath(request.resource.data.nik)).data.get('wargaId', '') == docId &&
+        getAfter(sensusNikIndexPath(request.resource.data.nik)).data.get('nik', '') == request.resource.data.nik;
+    }
+    function indexPointsToMatchingSensus(nik) {
+      return request.resource.data.get('nik', '') == nik &&
+        request.resource.data.get('wargaId', '') is string &&
+        request.resource.data.wargaId.size() > 0 &&
+        existsAfter(sensusPath(request.resource.data.wargaId)) &&
+        getAfter(sensusPath(request.resource.data.wargaId)).data.get('nik', '') == nik &&
+        getAfter(sensusPath(request.resource.data.wargaId)).data.get('wargaId', '') == request.resource.data.wargaId;
+    }
+
+    // Helper Tahap 2 - Pelayanan Masyarakat.
+
+function s2SignedIn() {
+  return request.auth != null;
+}
+function s2Profile() {
+  return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+}
+function s2HasRole(roleName) {
+  return s2SignedIn() && (
+    s2Profile().get('role', 'warga') == roleName ||
+    s2Profile().get('roles', []).hasAny([roleName])
+  );
+}
+function s2Admin() {
+  return s2HasRole('owner') || s2HasRole('admin');
+}
+function s2Staff() {
+  return s2Admin() || s2HasRole('perangkat_kawil') ||
+    s2HasRole('ketua_rw') || s2HasRole('ketua_rt');
+}
+function s2InArea(data) {
+  return s2Admin() ||
+    (s2HasRole('perangkat_kawil') && data.kawilId == s2Profile().get('kawilId', '')) ||
+    (s2HasRole('ketua_rw') && data.rwId == s2Profile().get('rwId', '')) ||
+    (s2HasRole('ketua_rt') && data.rtId == s2Profile().get('rtId', ''));
+}
+function s2OwnScopedCreate() {
+  return s2SignedIn() &&
+    request.resource.data.pemohonUid == request.auth.uid &&
+    request.resource.data.kawilId == s2Profile().get('kawilId', '') &&
+    request.resource.data.rwId == s2Profile().get('rwId', '') &&
+    request.resource.data.rtId == s2Profile().get('rtId', '');
+}
+function s2ReviewFieldsOnly() {
+  return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+    'status', 'catatanPetugas', 'tanggapan', 'updatedAt', 'riwayatStatus',
+    'verifikasiRwOleh', 'verifikasiKawilOleh'
+  ]);
+}
+
+// Tahap 6 - SOS: laporan milik warga, penanganan terbatas sesuai wilayah.
+function s6OwnSosCreate() {
+  return s2SignedIn() &&
+    request.resource.data.get('pemohonUid', '') == request.auth.uid &&
+    request.resource.data.get('pemohonNama', '') is string &&
+    request.resource.data.get('uraian', '') is string &&
+    request.resource.data.get('uraian', '').size() > 0 &&
+    request.resource.data.get('status', '') == 'baru' &&
+    request.resource.data.get('kawilId', '') == s2Profile().get('kawilId', '') &&
+    request.resource.data.get('rwId', '') == s2Profile().get('rwId', '') &&
+    request.resource.data.get('rtId', '') == s2Profile().get('rtId', '') &&
+    request.resource.data.keys().hasOnly([
+      'jenis','uraian','lokasiManual','latitude','longitude','akurasiLokasiMeter',
+      'lokasiMaps','pemohonUid','pemohonNama','pemohonTelepon',
+      'kawil','kawilId','rw','rwId','rt','rtId','status','petugasMerespons',
+      'createdAt','updatedAt'
+    ]);
+}
+function s6CanReadSos(data) {
+  return s2SignedIn() && (
+    data.get('pemohonUid', '') == request.auth.uid ||
+    s2InArea(data)
+  );
+}
+function s6CanUpdateSos() {
+  return s2Staff() && s2InArea(resource.data) &&
+    request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+      'status','petugasMerespons','catatanPetugas','ditanganiOlehUid',
+      'ditanganiOlehNama','updatedAt','selesaiAt'
+    ]) &&
+    request.resource.data.get('status', resource.data.get('status', 'baru'))
+      in ['baru','diproses','selesai','dibatalkan'] &&
+    request.resource.data.get('petugasMerespons', resource.data.get('petugasMerespons', [])) is list;
+}
+function s6OwnSosNotificationCreate() {
+  return s2SignedIn() &&
+    request.resource.data.get('jenis', '') == 'sos' &&
+    request.resource.data.get('dibuatOlehUid', '') == request.auth.uid &&
+    request.resource.data.get('referensiId', '') is string &&
+    exists(/databases/$(database)/documents/kampung/kiarajangkung/laporan_sos/$(request.resource.data.referensiId)) &&
+    get(/databases/$(database)/documents/kampung/kiarajangkung/laporan_sos/$(request.resource.data.referensiId)).data.get('pemohonUid', '') == request.auth.uid &&
+    request.resource.data.get('kawilId', '') == s2Profile().get('kawilId', '') &&
+    request.resource.data.get('rwId', '') == s2Profile().get('rwId', '') &&
+    request.resource.data.get('rtId', '') == s2Profile().get('rtId', '') &&
+    request.resource.data.keys().hasOnly([
+      'jenis','referensiId','dibuatOlehUid','judul','pesan','kawil','kawilId',
+      'rw','rwId','rt','rtId','targetLevel','targetRoles','status','createdAt'
+    ]);
+}
+
+
+
+
+    // ============================================================
+    // TAHAP 3 - KOORDINASI WILAYAH
+    // Dokumen inti append-only: tidak boleh diedit/dihapus.
+    // Instruksi/tugas resmi hanya Kawil -> RW atau RW -> RT.
+    // ============================================================
+    function s3Profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function s3HasRole(roleName) {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        (s3Profile().get('role', 'warga') == roleName ||
+         s3Profile().get('roles', []).hasAny([roleName]));
+    }
+    function s3Admin() { return s3HasRole('owner') || s3HasRole('admin'); }
+    function s3Staff() {
+      return s3Admin() || s3HasRole('perangkat_kawil') ||
+        s3HasRole('ketua_rw') || s3HasRole('ketua_rt');
+    }
+    function s3OwnScope(data) {
+      return s3Admin() ||
+        (s3HasRole('perangkat_kawil') && data.get('kawilId', '') == s3Profile().get('kawilId', '')) ||
+        (s3HasRole('ketua_rw') && data.get('rwId', '') == s3Profile().get('rwId', '')) ||
+        (s3HasRole('ketua_rt') && data.get('rtId', '') == s3Profile().get('rtId', ''));
+    }
+    function s3CanRead(data) {
+      return s3OwnScope(data) ||
+        (data.get('publik', false) == true);
+    }
+    function s3CanReadForum(data) {
+      return s3OwnScope(data) ||
+        (s3HasRole('ketua_rt') && data.get('rwId', '') == s3Profile().get('rwId', ''));
+    }
+    function s3RwPath(rwId) {
+      return /databases/$(database)/documents/kampung/kiarajangkung/wilayah_rw/$(rwId);
+    }
+    function s3RtPath(rtId) {
+      return /databases/$(database)/documents/kampung/kiarajangkung/wilayah_rt/$(rtId);
+    }
+    function s3CanCreateHierarchy(data) {
+      return s3Admin() || (
+        s3HasRole('perangkat_kawil') && data.get('targetLevel', '') == 'rw' &&
+        data.get('targetId', '') == data.get('rwId', '') && data.get('rtId', '') == '' &&
+        data.get('kawilId', '') == s3Profile().get('kawilId', '') &&
+        exists(s3RwPath(data.get('targetId', ''))) &&
+        get(s3RwPath(data.get('targetId', ''))).data.get('kawilId', '') == s3Profile().get('kawilId', '')
+      ) || (
+        s3HasRole('ketua_rw') && data.get('targetLevel', '') == 'rt' &&
+        data.get('targetId', '') == data.get('rtId', '') &&
+        data.get('rwId', '') == s3Profile().get('rwId', '') &&
+        exists(s3RtPath(data.get('targetId', ''))) &&
+        get(s3RtPath(data.get('targetId', ''))).data.get('rwId', '') == s3Profile().get('rwId', '')
+      );
+    }
+    function s3TaskPath(taskId) {
+      return /databases/$(database)/documents/kampung/kiarajangkung/koordinasi_tugas/$(taskId);
+    }
+    function s3InstructionPath(instructionId) {
+      return /databases/$(database)/documents/kampung/kiarajangkung/koordinasi_instruksi/$(instructionId);
+    }
+    function s3CanAppendChange(data) {
+      return s3Admin() || (s3Staff() && data.get('dibuatOlehUid', '') == request.auth.uid && s3OwnScope(data) &&
+        data.get('aksi', '') in ['koreksi', 'pembatalan'] &&
+        ((data.get('jenisDokumen', '') == 'instruksi' && exists(s3InstructionPath(data.get('referensiId', ''))) &&
+          get(s3InstructionPath(data.get('referensiId', ''))).data.get('dibuatOlehUid', '') == request.auth.uid) ||
+         (data.get('jenisDokumen', '') == 'tugas' && exists(s3TaskPath(data.get('referensiId', ''))) &&
+          get(s3TaskPath(data.get('referensiId', ''))).data.get('dibuatOlehUid', '') == request.auth.uid)));
+    }
+    function s3CanAddProgress(data) {
+      return s3Admin() || (s3Staff() && data.get('dibuatOlehUid', '') == request.auth.uid &&
+        data.get('tugasId', '') is string && exists(s3TaskPath(data.get('tugasId', ''))) &&
+        s3OwnScope(data) && (
+          (get(s3TaskPath(data.get('tugasId', ''))).data.get('targetLevel', '') == 'rw' &&
+           s3HasRole('ketua_rw') && get(s3TaskPath(data.get('tugasId', ''))).data.get('targetId', '') == s3Profile().get('rwId', '')) ||
+          (get(s3TaskPath(data.get('tugasId', ''))).data.get('targetLevel', '') == 'rt' &&
+           s3HasRole('ketua_rt') && get(s3TaskPath(data.get('tugasId', ''))).data.get('targetId', '') == s3Profile().get('rtId', ''))
+        ));
+    }
+    function s3OwnMessage(data) {
+      return s3Staff() && data.get('dibuatOlehUid', '') == request.auth.uid && s3OwnScope(data);
+    }
+
+    match /kampung/kiarajangkung/koordinasi_instruksi/{docId} {
+      allow create: if s3CanCreateHierarchy(request.resource.data) &&
+        request.resource.data.get('dibuatOlehUid', '') == request.auth.uid;
+      allow read: if s3CanRead(resource.data);
+      allow update, delete: if false;
+    }
+    match /kampung/kiarajangkung/koordinasi_tugas/{docId} {
+      allow create: if s3CanCreateHierarchy(request.resource.data) &&
+        request.resource.data.get('dibuatOlehUid', '') == request.auth.uid;
+      allow read: if s3CanRead(resource.data);
+      allow update, delete: if false;
+    }
+    match /kampung/kiarajangkung/koordinasi_progres/{docId} {
+      allow create: if s3CanAddProgress(request.resource.data);
+      allow read: if s3CanRead(resource.data);
+      allow update, delete: if false;
+    }
+    match /kampung/kiarajangkung/koordinasi_rapat/{docId} {
+      allow create: if s3OwnMessage(request.resource.data);
+      allow read: if s3CanRead(resource.data);
+      allow update, delete: if false;
+    }
+
+    match /kampung/kiarajangkung/koordinasi_perubahan/{docId} {
+      allow create: if s3CanAppendChange(request.resource.data);
+      allow read: if s3CanRead(resource.data);
+      allow update, delete: if false;
+    }
+    match /kampung/kiarajangkung/koordinasi_notulen/{docId} {
+      allow create: if s3OwnMessage(request.resource.data);
+      allow read: if s3CanRead(resource.data);
+      allow update, delete: if false;
+    }
+    match /kampung/kiarajangkung/koordinasi_kehadiran/{docId} {
+      allow create: if s3Staff() && s3OwnScope(request.resource.data) &&
+        request.resource.data.get('uid', '') == request.auth.uid;
+      allow read: if s3CanRead(resource.data);
+      allow update, delete: if false;
+    }
+    match /kampung/kiarajangkung/koordinasi_forum/{docId} {
+      allow create: if s3OwnMessage(request.resource.data);
+      allow read: if s3CanReadForum(resource.data);
+      allow update, delete: if false;
+    }
+    match /kampung/kiarajangkung/koordinasi_pengumuman/{docId} {
+      allow create: if s3OwnMessage(request.resource.data);
+      allow read: if s3CanRead(resource.data);
+      allow update, delete: if false;
+    }
+    match /kampung/kiarajangkung/koordinasi_konfirmasi/{docId} {
+      allow create: if s3Staff() && s3OwnScope(request.resource.data) &&
+        request.resource.data.get('uid', '') == request.auth.uid;
+      allow read: if s3CanRead(resource.data);
+      allow update, delete: if false;
+    }
+
+
+    // Konfigurasi migrasi hanya dapat dibaca/diubah Owner dan Admin.
+    // Field dibatasi agar dokumen konfigurasi tidak menjadi jalur eskalasi hak akses.
+    match /system_config/{configId} {
+      allow read: if configId == 'sensus_migration' && signedIn();
+      allow create, update: if configId == 'sensus_migration' && isOwnerOrAdmin() &&
+        request.resource.data.keys().hasOnly([
+          'lockResidentEdits','lockMessage','lockUpdatedAt','lockUpdatedBy'
+        ]) &&
+        request.resource.data.get('lockResidentEdits', false) is bool &&
+        request.resource.data.get('lockUpdatedBy', '') == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isOwnerOrAdmin());
+      // Provisioning akun oleh Admin/Owner melalui Code.gs. Admin hanya boleh
+      // membuat akun role Warga; role tambahan hanya boleh dibuat Owner.
+      allow create: if (
+        signedIn() && request.auth.uid == userId &&
+        request.resource.data.role == 'warga' &&
+        request.resource.data.status == 'Aktif' &&
+        request.resource.data.mustChangePassword == true &&
+        request.resource.data.nik is string &&
+        request.resource.data.nik.matches('^[0-9]{16}$') &&
+        request.resource.data.email == request.auth.token.email
+      ) || (
+        isOwnerOrAdmin() &&
+        request.resource.data.nik is string &&
+        request.resource.data.nik.matches('^[0-9]{16}$') &&
+        (isOwner() || (request.resource.data.get('role', 'warga') == 'warga' && request.resource.data.get('roles', ['warga']).hasOnly(['warga'])))
+      );
+      allow update: if isOwner() || (
+        isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'nama','telepon','alamat','rt','rw','kawil','kawilId','rwId','rtId','fotoProfilUrl','status','updatedAt'
+        ])
+      ) || (
+        signedIn() && request.auth.uid == userId &&
+        !residentEditsLocked() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'telepon','alamat','fotoProfilUrl','updatedAt','mustChangePassword','fcmTokens','pushEnabled','pushUpdatedAt'
+        ]) &&
+        request.resource.data.get('role','') == resource.data.get('role','') &&
+        request.resource.data.get('roles',[]) == resource.data.get('roles',[]) &&
+        request.resource.data.get('nik','') == resource.data.get('nik','') &&
+        request.resource.data.get('email','') == resource.data.get('email','') &&
+        request.resource.data.get('status','') == resource.data.get('status','') &&
+        (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['mustChangePassword']) ||
+          (resource.data.get('mustChangePassword', false) == true && request.resource.data.get('mustChangePassword', false) == false)
+        )
+      );
+      allow delete: if isOwner();
+    }
+
+    // ============================================================
+    // TAHAP 2 - PELAYANAN MASYARAKAT
+    // ============================================================
+match /kampung/kiarajangkung/pelayanan_surat/{suratId} {
+  allow create: if s2OwnScopedCreate() && request.resource.data.status == 'diajukan';
+  allow read: if s2SignedIn() && (
+    resource.data.pemohonUid == request.auth.uid || s2InArea(resource.data)
+  );
+  allow update: if (
+    resource.data.pemohonUid == request.auth.uid && resource.data.status == 'perlu_perbaikan' &&
+    request.resource.data.status == 'diajukan' &&
+    request.resource.data.diff(resource.data).affectedKeys().hasOnly(['keperluan','catatanPemohon','status','updatedAt','riwayatStatus'])
+  ) || (s2InArea(resource.data) && s2ReviewFieldsOnly() && (
+    s2Admin() ||
+    (s2HasRole('ketua_rt') && resource.data.status == 'diajukan' && request.resource.data.status == 'diperiksa_rt') ||
+    (s2HasRole('ketua_rw') && resource.data.status == 'diperiksa_rt' && request.resource.data.status == 'diverifikasi_rw') ||
+    (s2HasRole('perangkat_kawil') && resource.data.status == 'diverifikasi_rw' && request.resource.data.status == 'disetujui') ||
+    (s2Staff() && request.resource.data.status in ['perlu_perbaikan', 'ditolak'])
+  ));
+  allow delete: if s2Admin();
+}
+
+match /kampung/kiarajangkung/pengaduan/{pengaduanId} {
+  allow create: if s2OwnScopedCreate() && request.resource.data.status == 'baru';
+  allow read: if s2SignedIn() && (
+    resource.data.pemohonUid == request.auth.uid || s2InArea(resource.data)
+  );
+  allow update: if s2InArea(resource.data) &&
+    request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+      'status', 'tanggapan', 'catatanPetugas', 'updatedAt', 'riwayatStatus'
+    ]) && (s2Admin() || s2Staff()) &&
+    request.resource.data.status in ['ditindaklanjuti', 'selesai', 'ditolak'];
+  allow delete: if s2Admin();
+}
+
+match /kampung/kiarajangkung/kegiatan_rt/{kegiatanId} {
+  allow create: if s2Staff() && s2InArea(request.resource.data) &&
+    request.resource.data.dibuatOlehUid == request.auth.uid;
+  allow read: if s2SignedIn() && (
+    resource.data.status == 'terbit' || s2InArea(resource.data)
+  );
+  allow update: if s2InArea(resource.data) && (s2Admin() || s2Staff()) &&
+    request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+      'judul', 'deskripsi', 'tanggal', 'waktu', 'lokasi', 'status', 'updatedAt'
+    ]);
+  allow delete: if s2Admin();
+}
+
+match /kampung/kiarajangkung/laporan_rt_bulanan/{laporanId} {
+  allow create: if s2HasRole('ketua_rt') && s2InArea(request.resource.data) &&
+    request.resource.data.rtId == s2Profile().get('rtId', '') &&
+    request.resource.data.dikirimOlehUid == request.auth.uid &&
+    request.resource.data.status == 'dikirim';
+  allow read: if s2SignedIn() && s2InArea(resource.data);
+  allow update: if s2InArea(resource.data) && s2ReviewFieldsOnly() && (
+    s2Admin() ||
+    (s2HasRole('ketua_rw') && resource.data.status == 'dikirim' && request.resource.data.status == 'diverifikasi_rw') ||
+    (s2HasRole('perangkat_kawil') && resource.data.status == 'diverifikasi_rw' && request.resource.data.status == 'diterima_kawil')
+  );
+  allow delete: if s2Admin();
+}
+
+// Antrean notifikasi agenda untuk Cloud Function FCM.
+// Dokumen ini bukan pengiriman push dengan sendirinya.
+match /kampung/kiarajangkung/notifikasi/{notifikasiId} {
+  allow create: if (s2Staff() && s2InArea(request.resource.data)) ||
+    s6OwnSosNotificationCreate();
+  allow read, update, delete: if s2Admin();
+}
+
+// Laporan SOS: warga hanya dapat membuat dan membaca laporan miliknya;
+// petugas wilayah dapat membaca dan memperbarui status penanganan.
+match /kampung/kiarajangkung/laporan_sos/{sosId} {
+  allow create: if s6OwnSosCreate();
+  allow read: if s6CanReadSos(resource.data);
+  allow update: if s6CanUpdateSos();
+  allow delete: if s2Admin();
+}
+
+
+    match /kampung/{kampungId}/{module}/{docId} {
+      // Sensus bersifat pribadi: Owner/Admin dapat membaca seluruh data;
+      // warga hanya dapat membaca dokumen sensus miliknya sendiri.
+      allow read: if module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan']
+        ? false
+        : module in ['wilayah_kawil', 'wilayah_rw', 'wilayah_rt']
+          ? (isOwnerOrAdmin() ||
+             (module == 'wilayah_rw' && s3HasRole('perangkat_kawil') && resource.data.get('kawilId', '') == s3Profile().get('kawilId', '')) ||
+             (module == 'wilayah_rt' && ((s3HasRole('ketua_rw') && resource.data.get('rwId', '') == s3Profile().get('rwId', '')) ||
+               (s3HasRole('perangkat_kawil') && resource.data.get('kawilId', '') == s3Profile().get('kawilId', '')))))
+          : module == 'sensus'
+            ? (isOwnerOrAdmin() || ownsSensus(docId))
+            : (module in ['riwayat_perubahan', 'sensus_nik_index'] ? isOwnerOrAdmin() : signedIn());
+
+      allow create: if module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan']
+        ? false
+        : module == 'riwayat_perubahan'
+          ? (isOwnerOrAdmin() || (hasUserProfile() && request.resource.data.get('uid', '') == request.auth.uid && request.resource.data.get('wargaId', '') == userData().get('wargaId', '')))
+          : module == 'sensus'
+            ? (isOwnerOrAdmin() && hasMatchingSensusNikIndex(docId) &&
+               (isOwner() || (request.resource.data.get('role', 'warga') == 'warga' && request.resource.data.get('roles', ['warga']).hasOnly(['warga']))))
+            : (module != 'sensus_nik_index' && (isOwnerOrAdmin() || (
+              module == 'ronda_absensi' && selfRondaRecord() &&
+              request.resource.data.get('tanggal','') is string &&
+              request.resource.data.get('nama','') is string &&
+              request.resource.data.keys().hasOnly([
+                'uid','wargaId','nama','tanggal','hari','scheduleId',
+                'statusKesediaan','alasan','diperbaruiPada',
+                'waktuHadir','waktuHadirText','status','updatedAt'
+              ]) && (
+                (request.resource.data.get('statusKesediaan','') in ['Bersedia','Berhalangan'] &&
+                 (request.resource.data.statusKesediaan != 'Berhalangan' || request.resource.data.get('alasan','').size() > 0)) ||
+                (request.resource.data.get('waktuHadir', null) == request.time && request.resource.data.get('status','') == 'Hadir')
+              )
+            )));
+
+      allow update: if module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan'] ? false : (module == 'riwayat_perubahan' ? false : ((module != 'sensus_nik_index' && isOwnerOrAdmin() && (
+        module != 'sensus' || (
+          request.resource.data.get('nik','') == resource.data.get('nik','') &&
+          request.resource.data.get('wargaId','') == docId &&
+          hasMatchingSensusNikIndex(docId) &&
+          (isOwner() || (request.resource.data.get('role',null) == resource.data.get('role',null) && request.resource.data.get('roles',[]) == resource.data.get('roles',[])))
+        )
+      )) || (
+        module == 'sensus' && ownsSensus(docId) && !residentEditsLocked() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'jenisKelamin','tempatLahir','tanggalLahir','telepon','agama',
+          'statusPerkawinan','pendidikan','pekerjaan','hubunganKeluarga',
+          'alamat','golonganDarah','kewarganegaraan',
+          'statusDalamKeluarga','kodePos','email','noHp','noTelp',
+          'namaAyah','namaIbu','keterangan','updatedAt'
+        ]) &&
+        request.resource.data.get('nama','') == resource.data.get('nama','') &&
+        request.resource.data.get('nik','') == resource.data.get('nik','') &&
+        request.resource.data.get('noKK','') == resource.data.get('noKK','') &&
+        request.resource.data.get('role',null) == resource.data.get('role',null) &&
+        request.resource.data.get('roles',[]) == resource.data.get('roles',[]) &&
+        request.resource.data.get('wargaId','') == resource.data.get('wargaId','') &&
+        request.resource.data.get('accountUid','') == resource.data.get('accountUid','')
+      ) || (
+        module == 'ronda_absensi' && signedIn() &&
+        resource.data.get('uid','') == request.auth.uid &&
+        request.resource.data.get('uid','') == request.auth.uid &&
+        request.resource.data.get('scheduleId','') == resource.data.get('scheduleId','') &&
+        request.resource.data.get('tanggal','') == resource.data.get('tanggal','') &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'statusKesediaan','alasan','diperbaruiPada','waktuHadir','waktuHadirText',
+          'waktuPulang','waktuPulangText','status','updatedAt'
+        ]) && (
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['statusKesediaan','alasan','diperbaruiPada']) &&
+           request.resource.data.get('statusKesediaan','') in ['Bersedia','Berhalangan'] &&
+           (request.resource.data.statusKesediaan != 'Berhalangan' || request.resource.data.get('alasan','').size() > 0)) ||
+          (resource.data.get('waktuHadir',null) == null && request.resource.data.get('waktuHadir',null) == request.time && request.resource.data.get('status','') == 'Hadir') ||
+          (resource.data.get('waktuHadir',null) != null && resource.data.get('waktuPulang',null) == null && request.resource.data.get('waktuPulang',null) == request.time && request.resource.data.get('status','') == 'Selesai Ronda')
+        )
+      ) || (
+        module == 'organisasi' &&
+        signedIn() && resource.data.get('ketuaUid','') == request.auth.uid &&
+        request.resource.data.get('ketuaUid','') == resource.data.get('ketuaUid','') &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'judul','nama','kategori','ketua','deskripsi','sejarah','tujuan','wakil','sekretaris','bendahara',
+          'anggota','programKerja','alamat','telepon','lokasiMaps','periode','fotoUrl','updatedAt','updatedBy','agenda','kegiatan'
+        ])
+      )));
+
+      allow delete: if module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan'] ? false : (module in ['riwayat_perubahan', 'sensus', 'sensus_nik_index'] ? false : isOwnerOrAdmin());
+    }
+
+    // Indeks NIK harus selalu menunjuk ke dokumen Sensus yang cocok.
+    // getAfter memastikan transaksi impor membuat/memperbarui indeks dan Sensus bersama.
+    match /kampung/kiarajangkung/sensus_nik_index/{nik} {
+      allow read: if isOwnerOrAdmin();
+      allow create, update: if isOwnerOrAdmin() &&
+        nik.matches('^[0-9]{16}$') && indexPointsToMatchingSensus(nik);
+      allow delete: if isOwnerOrAdmin() &&
+        resource.data.get('nik', '') == nik &&
+        resource.data.get('wargaId', '') is string;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
