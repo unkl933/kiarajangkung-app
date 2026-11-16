@@ -481,7 +481,20 @@ class PhotoService {
     }
   }
 
-  static Future<Map<String, dynamic>> sendSosNotification(String sosId) =>\n      _request({'action': 'sendSosNotification', 'sosId': sosId});\n\n  static Future<String> upload(Uint8List bytes, String moduleKey, {String? docId}) async {
+  static Future<Map<String, dynamic>> sendSosNotification(String sosId) async {
+    final result = await _request({'action': 'sendSosNotification', 'sosId': sosId});
+    final failed = (result['pushGagal'] as num?)?.toInt() ?? 0;
+    final recipients = (result['penerimaInbox'] as num?)?.toInt() ?? 0;
+    if (recipients == 0) {
+      throw Exception((result['catatan'] ?? 'Belum ada petugas penerima SOS yang cocok.').toString());
+    }
+    if (failed > 0) {
+      throw Exception('Inbox petugas tersimpan, tetapi $failed perangkat gagal menerima push.');
+    }
+    return result;
+  }
+
+  static Future<String> upload(Uint8List bytes, String moduleKey, {String? docId}) async {
     if (bytes.lengthInBytes > maxBytes) throw Exception('Foto melebihi batas 1 MB.');
     final result = await _request({
       'action': 'upload',
