@@ -4010,6 +4010,98 @@ class _KoordinasiWilayahPageState extends State<KoordinasiWilayahPage> with Sing
 }
 
 
+class InformasiKampungPage extends StatelessWidget {
+  final bool isAdmin;
+  final Map<String, dynamic> profile;
+  const InformasiKampungPage({super.key, required this.isAdmin, this.profile = const {}});
+
+  bool _published(Map<String, dynamic> data, bool agenda) {
+    final status = (data['status'] ?? (agenda ? 'draf' : 'aktif')).toString().toLowerCase();
+    return agenda
+        ? status == 'terbit' || status == 'aktif' || data['dipublikasikan'] == true
+        : status != 'nonaktif' && status != 'arsip' && status != 'draf';
+  }
+
+  Widget _list(String collection, bool agenda) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    stream: Db.module(collection).snapshots(),
+    builder: (context, snap) {
+      if (snap.hasError) return Center(child: Text('Gagal memuat data: ${snap.error}'));
+      if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+      final docs = snap.data!.docs.where((d) => _published(d.data(), agenda)).toList();
+      if (docs.isEmpty) return Center(child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Text(agenda ? 'Belum ada agenda yang diterbitkan.' : 'Belum ada pengumuman kampung.'),
+      ));
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
+        children: docs.map((doc) {
+          final d = doc.data();
+          final title = (d['judul'] ?? d['nama'] ?? d['title'] ?? (agenda ? 'Kegiatan kampung' : 'Pengumuman')).toString();
+          final description = (d['deskripsi'] ?? d['keterangan'] ?? d['pesan'] ?? '').toString();
+          final meta = [
+            (d['tanggal'] ?? '').toString(),
+            (d['waktu'] ?? '').toString(),
+            (d['lokasi'] ?? '').toString(),
+          ].where((v) => v.trim().isNotEmpty).join(' • ');
+          return Card(
+            margin: const EdgeInsets.only(bottom: 10),
+            child: ListTile(
+              isThreeLine: description.isNotEmpty,
+              leading: CircleAvatar(child: Icon(agenda ? Icons.event_note_outlined : Icons.campaign_outlined)),
+              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text([if (meta.isNotEmpty) meta, if (description.isNotEmpty) description].join('\n')),
+            ),
+          );
+        }).toList(),
+      );
+    },
+  );
+
+  @override
+  Widget build(BuildContext context) => DefaultTabController(
+    length: 2,
+    child: Scaffold(
+      appBar: AppBar(
+        title: const Text('Informasi Kampung'),
+        bottom: const TabBar(tabs: [
+          Tab(icon: Icon(Icons.campaign_outlined), text: 'Pengumuman'),
+          Tab(icon: Icon(Icons.event_note_outlined), text: 'Agenda'),
+        ]),
+      ),
+      body: Column(children: [
+        Expanded(child: TabBarView(children: [
+          _list('pengumuman', false),
+          _list('kegiatan_rt', true),
+        ])),
+        SafeArea(top: false, child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+          child: Row(children: [
+            if (isAdmin) Expanded(child: OutlinedButton.icon(
+              onPressed: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => ModulePage(
+                  module: modules.firstWhere((m) => m.keyName == 'pengumuman'),
+                  isAdmin: true, profile: profile, rawView: true,
+                ),
+              )),
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('Kelola Pengumuman'),
+            )),
+            if (isAdmin) const SizedBox(width: 8),
+            Expanded(child: FilledButton.icon(
+              onPressed: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => PelayananMasyarakatPage(isAdmin: isAdmin),
+              )),
+              icon: const Icon(Icons.event_available_outlined),
+              label: const Text('Pelayanan & Kegiatan'),
+            )),
+          ]),
+        )),
+      ]),
+    ),
+  );
+}
+
+
 class ModulePage extends StatefulWidget {
   final ModuleInfo module;
   final bool isAdmin;
@@ -4045,7 +4137,7 @@ class _ModulePageState extends State<ModulePage> {
   Widget build(BuildContext context) {
     final module = widget.module;
     final isAdmin = widget.isAdmin;
-    if (module.keyName == 'darurat') return EmergencyCenterPage(profile: widget.profile, isAdmin: isAdmin);
+    if (module.keyName == 'darurat') return EmergencyCenterPage(profile: widget.profile, isAdmin: isAdmin);\n    if (module.keyName == 'pengumuman' && !widget.rawView) return InformasiKampungPage(isAdmin: isAdmin, profile: widget.profile);
     if (module.keyName == 'profil_kampung') {
       return ProfileKampungPage(isAdmin: isAdmin);
     }
