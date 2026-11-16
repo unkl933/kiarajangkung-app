@@ -128,6 +128,9 @@ exports.rondaReminders = onSchedule({ schedule: 'every 5 minutes', timeZone: 'As
 
 
 // Kirim push notification untuk laporan SOS kepada pengurus sesuai role dan wilayah.
+// Kirim push DAN buat inbox permanen untuk SOS kepada Owner serta pengurus
+// wilayah yang sesuai. Admin SDK melewati Rules; penerima ditentukan dari profil
+// users, bukan dari targetRoles yang dikirim aplikasi warga.
 exports.sosNotificationCreated = onDocumentCreated(
   'kampung/kiarajangkung/notifikasi/{notificationId}',
   async event => {
@@ -139,8 +142,10 @@ exports.sosNotificationCreated = onDocumentCreated(
     const ref = snap.ref;
     const claimed = await db.runTransaction(async tx => {
       const current = await tx.get(ref);
-      const status = String(current.data()?.pushStatus || '');
-      if (status === 'terkirim' || status === 'memproses') return false;
+      const currentData = current.data() || {};
+      if (currentData.pushStatus === 'terkirim') return false;
+      const lastAttempt = currentData.pushAttemptAt?.toDate?.()?.getTime?.() || 0;
+      if (currentData.pushStatus === 'memproses' && Date.now() - lastAttempt < 5 * 60 * 1000) return false;
       tx.update(ref, {
         pushStatus: 'memproses',
         pushAttemptAt: admin.firestore.FieldValue.serverTimestamp()
@@ -150,18 +155,14 @@ exports.sosNotificationCreated = onDocumentCreated(
     if (!claimed) return;
 
     try {
-      // Daftar penerima ditetapkan server. Jangan mempercayai targetRoles
-      // dari dokumen yang dibuat warga karena dapat dipakai untuk broadcast massal.
-      const targetRoles = ['ketua_rt', 'ketua_rw', 'perangkat_kawil', 'admin', 'owner'];
+      const targetRoles = ['perangkat_kawil', 'kawil', 'admin', 'owner'];
       const usersSnap = await db.collection('users').get();
+      const recipients = [];
       const tokens = new Set();
-      const targetArea = ['kawilId', 'rwId', 'rtId'];
-      let matchedUsers = 0;
+      const targetArea = String(data.kawilId || '').trim();
 
       for (const userDoc of usersSnap.docs) {
         const user = userDoc.data() || {};
-        // Firestore Rules menerima role utama maupun roles; gabungkan keduanya
-        // agar perilaku notifikasi konsisten untuk akun multi-role.
         const roles = new Set([
           String(user.role || '').toLowerCase(),
           ...(Array.isArray(user.roles) ? user.roles.map(x => String(x).toLowerCase()) : [])
@@ -169,35 +170,48 @@ exports.sosNotificationCreated = onDocumentCreated(
         if (![...roles].some(role => targetRoles.includes(role))) continue;
 
         const isGlobalManager = roles.has('admin') || roles.has('owner');
-        const matchesArea = (keys) => keys.every(key => {
-          const requested = String(data[key] || '').trim();
-          const assigned = String(user[key] || '').trim();
-          return requested.length > 0 && assigned.length > 0 && assigned === requested;
-        });
-        const hasRegionalRoleInArea =
-          (roles.has('ketua_rt') && matchesArea(targetArea)) ||
-          (roles.has('ketua_rw') && matchesArea(['kawilId', 'rwId'])) ||
-          (roles.has('perangkat_kawil') && matchesArea(['kawilId']));
-        if (!isGlobalManager && !hasRegionalRoleInArea) continue;
+        const isMatchingKawil = targetArea.length > 0 &&
+          String(user.kawilId || '').trim() === targetArea &&
+          (roles.has('perangkat_kawil') || roles.has('kawil'));
+        if (!isGlobalManager && !isMatchingKawil) continue;
 
-        const userTokens = Array.isArray(user.fcmTokens) ? user.fcmTokens : [];
-        if (userTokens.length) matchedUsers++;
-        userTokens.forEach(token => {
+        recipients.push({ uid: userDoc.id, user });
+        (Array.isArray(user.fcmTokens) ? user.fcmTokens : []).forEach(token => {
           if (typeof token === 'string' && token.trim()) tokens.add(token.trim());
         });
+      }
+
+      const title = String(data.judul || 'SOS DARURAT');
+      const body = String(data.pesan || 'Ada warga yang membutuhkan bantuan segera.');
+      // Inbox per penerima membuat SOS tetap terlihat meskipun push ditolak OS,
+      // perangkat sedang offline, atau pengguna membuka aplikasi belakangan.
+      for (let i = 0; i < recipients.length; i += 400) {
+        const batch = db.batch();
+        for (const recipient of recipients.slice(i, i + 400)) {
+          const inboxRef = db.collection('users').doc(recipient.uid)
+            .collection('notifikasi').doc('sos_' + event.params.notificationId);
+          batch.set(inboxRef, {
+            jenis: 'sos',
+            kategori: 'darurat',
+            judul: title,
+            pesan: body,
+            referensiId: String(data.referensiId || ''),
+            screen: 'darurat',
+            isRead: false,
+            createdAt: data.createdAt || admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        }
+        await batch.commit();
       }
 
       const tokenList = [...tokens];
       let sent = 0;
       let failed = 0;
       for (let i = 0; i < tokenList.length; i += 500) {
-        const batch = tokenList.slice(i, i + 500);
+        const batchTokens = tokenList.slice(i, i + 500);
         const result = await admin.messaging().sendEachForMulticast({
-          tokens: batch,
-          notification: {
-            title: String(data.judul || 'SOS DARURAT'),
-            body: String(data.pesan || 'Ada warga yang membutuhkan bantuan segera.')
-          },
+          tokens: batchTokens,
+          notification: { title, body },
           data: {
             type: 'sos',
             screen: 'darurat',
@@ -212,10 +226,11 @@ exports.sosNotificationCreated = onDocumentCreated(
 
       await ref.update({
         pushStatus: 'terkirim',
+        pushJumlahPenerima: recipients.length,
         pushJumlahToken: tokenList.length,
         pushBerhasil: sent,
         pushGagal: failed,
-        pushJumlahAkun: matchedUsers,
+        pushJumlahAkun: recipients.length,
         pushSentAt: admin.firestore.FieldValue.serverTimestamp()
       });
     } catch (error) {
