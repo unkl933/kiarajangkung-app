@@ -980,6 +980,101 @@ class _DashboardServiceSearchState extends State<DashboardServiceSearch> {
   }
 }
 
+class _DashboardQuickAction extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
+  const _DashboardQuickAction({required this.icon, required this.title, required this.subtitle, required this.color, required this.onTap});
+  @override
+  Widget build(BuildContext context) => Card(
+    margin: EdgeInsets.zero,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(13),
+        child: Row(children: [
+          CircleAvatar(backgroundColor: color.withOpacity(.10), child: Icon(icon, color: color)),
+          const SizedBox(width: 9),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+            const SizedBox(height: 3),
+            Text(subtitle, style: const TextStyle(color: Colors.black54, fontSize: 10)),
+          ])),
+        ]),
+      ),
+    ),
+  );
+}
+
+class NotificationInboxPage extends StatelessWidget {
+  const NotificationInboxPage({super.key});
+
+  DateTime _date(dynamic value) => value is Timestamp ? value.toDate() : DateTime.tryParse((value ?? '').toString()) ?? DateTime.now();
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = Db.auth.currentUser?.uid ?? '';
+    if (uid.isEmpty) return const Scaffold(body: Center(child: Text('Silakan login kembali.')));
+    final query = Db.user(uid).collection('notifikasi').orderBy('createdAt', descending: true).limit(100);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Notifikasi')),
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: query.snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) return Center(child: Text('Gagal memuat notifikasi: ${snapshot.error}'));
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+          final docs = snapshot.data!.docs;
+          if (docs.isEmpty) return const Center(child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.notifications_none_rounded, size: 54, color: Colors.grey),
+              SizedBox(height: 10),
+              Text('Belum ada notifikasi', style: TextStyle(fontWeight: FontWeight.w700)),
+              SizedBox(height: 4),
+              Text('Pemberitahuan pengaduan dan pengumuman akan muncul di sini.', textAlign: TextAlign.center, style: TextStyle(color: Colors.black54)),
+            ]),
+          ));
+          return ListView.separated(
+            padding: const EdgeInsets.all(12),
+            itemCount: docs.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 7),
+            itemBuilder: (context, index) {
+              final doc = docs[index];
+              final data = doc.data();
+              final read = data['isRead'] == true || data['readAt'] != null;
+              final type = (data['kategori'] ?? data['jenis'] ?? 'informasi').toString();
+              final icon = type == 'pengaduan' ? Icons.support_agent_outlined : type == 'pengumuman' ? Icons.campaign_outlined : Icons.notifications_active_outlined;
+              final date = _date(data['createdAt']);
+              return Card(
+                color: read ? null : const Color(0xFFFFF8F2),
+                child: ListTile(
+                  leading: CircleAvatar(backgroundColor: const Color(0xFFFCEAEA), child: Icon(icon, color: const Color(0xFFC94B4B))),
+                  title: Text((data['judul'] ?? 'Pemberitahuan').toString(), style: TextStyle(fontWeight: read ? FontWeight.w500 : FontWeight.w800)),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 5),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text((data['pesan'] ?? data['isi'] ?? '').toString()),
+                      const SizedBox(height: 5),
+                      Text('${date.day.toString().padLeft(2, '0')}-${date.month.toString().padLeft(2, '0')}-${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}', style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                    ]),
+                  ),
+                  trailing: read ? const Icon(Icons.check_circle_outline, color: Colors.grey) : const Icon(Icons.circle, color: Color(0xFFC94B4B), size: 11),
+                  onTap: () async {
+                    if (!read) await doc.reference.update({'isRead': true, 'readAt': FieldValue.serverTimestamp()});
+                  },
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
 class HomePage extends StatefulWidget {
   final User user;
   final Map<String, dynamic> profile;
@@ -1027,6 +1122,25 @@ class _HomePageState extends State<HomePage> {
           const Flexible(child: Text('Kampung Kiarajangkung', maxLines: 1, overflow: TextOverflow.ellipsis)),
         ]),
         actions: [
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: Db.user(widget.user.uid).collection('notifikasi').where('isRead', isEqualTo: false).limit(50).snapshots(),
+            builder: (context, snapshot) {
+              final unread = snapshot.data?.docs.length ?? 0;
+              return IconButton(
+                tooltip: 'Notifikasi',
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationInboxPage())),
+                icon: Stack(clipBehavior: Clip.none, children: [
+                  const Icon(Icons.notifications_none_rounded),
+                  if (unread > 0) Positioned(right: -5, top: -5, child: Container(
+                    padding: const EdgeInsets.all(3),
+                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                    decoration: const BoxDecoration(color: Color(0xFFC94B4B), shape: BoxShape.circle),
+                    child: Text(unread > 99 ? '99+' : '$unread', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                  )),
+                ]),
+              );
+            },
+          ),
           if (isAdmin)
             IconButton(
               tooltip: 'Panel Admin',
@@ -1160,6 +1274,24 @@ class _HomePageState extends State<HomePage> {
           roles: roles,
           onOpen: openModule,
         ),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: _DashboardQuickAction(
+            icon: Icons.add_comment_outlined,
+            title: 'Buat Pengaduan',
+            subtitle: 'Laporkan masalah',
+            color: const Color(0xFFC94B4B),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PelayananMasyarakatPage(isAdmin: isAdmin, initialTab: 1))),
+          )),
+          const SizedBox(width: 10),
+          Expanded(child: _DashboardQuickAction(
+            icon: Icons.assignment_outlined,
+            title: 'Pengaduan Saya',
+            subtitle: 'Lihat status laporan',
+            color: const Color(0xFF327DBE),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PelayananMasyarakatPage(isAdmin: isAdmin, initialTab: 1))),
+          )),
+        ]),
         const SizedBox(height: 12),
         const DashboardAnnouncements(),
         if (roles.contains('perangkat_kawil')) ...[
@@ -2527,7 +2659,8 @@ class ProfileKampungSectionPage extends StatelessWidget {
 
 class PelayananMasyarakatPage extends StatefulWidget {
   final bool isAdmin;
-  const PelayananMasyarakatPage({super.key, required this.isAdmin});
+  final int initialTab;
+  const PelayananMasyarakatPage({super.key, required this.isAdmin, this.initialTab = 0});
 
   @override
   State<PelayananMasyarakatPage> createState() => _PelayananMasyarakatPageState();
@@ -2559,7 +2692,7 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 4, vsync: this);
+    _tabs = TabController(length: 4, initialIndex: widget.initialTab.clamp(0, 3), vsync: this);
     _tabs.addListener(_onTabChanged);
   }
 
