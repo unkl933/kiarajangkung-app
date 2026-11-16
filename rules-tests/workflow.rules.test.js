@@ -47,6 +47,12 @@ async function seed() {
       keperluan: 'Administrasi',
       status: 'diajukan',
     });
+    await setDoc(doc(db, root, 'pelayanan_surat', 'surat-warga-b'), {
+      ...scoped('wargaB'),
+      jenisSurat: 'Surat Pengantar',
+      keperluan: 'Administrasi',
+      status: 'diajukan',
+    });
     await setDoc(doc(db, root, 'pelayanan_surat', 'surat-perbaikan'), {
       ...scoped('wargaA'),
       jenisSurat: 'Surat Keterangan',
@@ -113,10 +119,8 @@ test('warga tidak dapat mengajukan surat atas nama orang lain atau wilayah lain'
 test('warga hanya dapat membaca surat miliknya sendiri', async () => {
   const db = env.authenticatedContext('wargaA').firestore();
   await assertSucceeds(getDoc(doc(db, root, 'pelayanan_surat', 'surat-warga-a')));
-  await assertFails(getDoc(doc(db, root, 'pelayanan_surat', 'surat-tidak-ada')));
-  await assertFails(getDoc(doc(db, root, 'pelayanan_surat', 'surat-perbaikan')).then(async snap => {
-    assert.equal(snap.data().pemohonUid, 'wargaA');
-  }));
+  await assertSucceeds(getDoc(doc(db, root, 'pelayanan_surat', 'surat-perbaikan')));
+  await assertFails(getDoc(doc(db, root, 'pelayanan_surat', 'surat-warga-b')));
 });
 
 test('warga dapat memperbaiki surat yang dikembalikan tanpa mengubah identitas dan wilayah', async () => {
