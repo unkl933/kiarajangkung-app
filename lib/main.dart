@@ -3114,9 +3114,16 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
       'terverifikasi': 'Validasi akhir Kawil',
       'ditindaklanjuti': 'Mulai tindak lanjut',
       'selesai': 'Selesaikan pengaduan',
+      'perlu_perbaikan_rt': 'Minta perbaikan oleh RT',
+      'perlu_perbaikan_rw': 'Minta perbaikan oleh RW',
+      'perlu_perbaikan_kawil': 'Minta perbaikan oleh Kawil',
       'ditolak': 'Tolak pengaduan',
     };
     final isComplete = status == 'selesai';
+    final isCorrection = status.startsWith('perlu_perbaikan_');
+    final isRejected = status == 'ditolak';
+    final requiredNote = isComplete || isCorrection || isRejected;
+    final prompt = isComplete ? 'Catatan penyelesaian *' : isCorrection ? 'Alasan / bagian yang harus diperbaiki *' : isRejected ? 'Alasan penolakan *' : 'Catatan untuk warga (opsional)';
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -3126,16 +3133,16 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
           minLines: 2,
           maxLines: 4,
           decoration: InputDecoration(
-            labelText: isComplete ? 'Catatan penyelesaian *' : 'Catatan (opsional)',
-            hintText: isComplete ? 'Jelaskan tindakan yang sudah dilakukan' : 'Tambahkan keterangan untuk warga',
+            labelText: prompt,
+            hintText: isComplete ? 'Jelaskan tindakan yang sudah dilakukan' : isCorrection ? 'Jelaskan dengan jelas apa yang perlu dilengkapi atau diperbaiki' : isRejected ? 'Jelaskan alasan pengaduan tidak dapat diproses' : 'Tambahkan keterangan untuk warga',
           ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Batal')),
           FilledButton(
             onPressed: () {
-              if (isComplete && note.text.trim().isEmpty) {
-                showMessage(dialogContext, 'Catatan penyelesaian wajib diisi.');
+              if (requiredNote && note.text.trim().isEmpty) {
+                showMessage(dialogContext, 'Alasan atau catatan wajib diisi.');
                 return;
               }
               Navigator.pop(dialogContext, true);
@@ -3151,6 +3158,7 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
         final update = <String, dynamic>{
           'status': status,
           'catatanPetugas': message,
+          'tanggapan': message,
           'updatedAt': FieldValue.serverTimestamp(),
           'riwayatStatus': FieldValue.arrayUnion([{
             'status': status, 'olehUid': _uid, 'olehNama': _name(),
@@ -3169,6 +3177,58 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
       });
     }
     note.dispose();
+  }
+
+  Future<void> _resubmitComplaint(DocumentSnapshot<Map<String, dynamic>> doc, Map<String, dynamic> data) async {
+    final form = GlobalKey<FormState>();
+    final title = TextEditingController(text: (data['judul'] ?? '').toString());
+    final description = TextEditingController(text: (data['uraian'] ?? '').toString());
+    final location = TextEditingController(text: (data['lokasi'] ?? '').toString());
+    String category = (data['kategori'] ?? 'Lainnya').toString();
+    String urgency = (data['prioritas'] ?? 'Normal').toString();
+    const categories = ['Infrastruktur','Kebersihan','Keamanan','Sosial','Administrasi','Lainnya'];
+    const urgencies = ['Rendah','Normal','Tinggi','Darurat'];
+    if (!categories.contains(category)) category = 'Lainnya';
+    if (!urgencies.contains(urgency)) urgency = 'Normal';
+    final oldStatus = (data['status'] ?? '').toString();
+    final targetStatus = switch (oldStatus) {
+      'perlu_perbaikan_rt' => 'menunggu_validasi_rt',
+      'perlu_perbaikan_rw' => 'menunggu_validasi_rw',
+      'perlu_perbaikan_kawil' => 'menunggu_validasi_kawil',
+      _ => '',
+    };
+    final ok = await showDialog<bool>(context: context, builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Perbaiki dan kirim ulang pengaduan'),
+        content: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextFormField(controller: title, decoration: const InputDecoration(labelText: 'Judul pengaduan *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Judul wajib diisi' : null),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(value: category, decoration: const InputDecoration(labelText: 'Kategori'), items: categories.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: (v) => setDialogState(() { if (v != null) category = v; })),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(value: urgency, decoration: const InputDecoration(labelText: 'Prioritas'), items: urgencies.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: (v) => setDialogState(() { if (v != null) urgency = v; })),
+          const SizedBox(height: 10),
+          TextFormField(controller: description, minLines: 3, maxLines: 5, decoration: const InputDecoration(labelText: 'Uraian pengaduan *'), validator: (v) => (v ?? '').trim().isEmpty ? 'Uraian wajib diisi' : null),
+          const SizedBox(height: 10),
+          TextField(controller: location, decoration: const InputDecoration(labelText: 'Lokasi kejadian / alamat')),
+        ]))),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Batal')),
+          FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(dialogContext, true); }, child: const Text('Kirim ulang'))],
+      ),
+    ));
+    if (ok == true && targetStatus.isNotEmpty) {
+      await _runBusy(() async {
+        await doc.reference.update({
+          'judul': title.text.trim(), 'kategori': category, 'prioritas': urgency,
+          'uraian': description.text.trim(), 'lokasi': location.text.trim(),
+          'status': targetStatus, 'updatedAt': FieldValue.serverTimestamp(),
+          'riwayatStatus': FieldValue.arrayUnion([{
+            'status': targetStatus, 'olehUid': _uid, 'olehNama': _name(),
+            'waktu': Timestamp.now(), 'catatan': 'Warga memperbaiki pengaduan dan mengirim ulang.',
+          }]),
+        });
+      });
+    }
+    title.dispose(); description.dispose(); location.dispose();
   }
 
   Future<void> _resubmitLetter(DocumentSnapshot<Map<String, dynamic>> doc, Map<String, dynamic> data) async {
@@ -3228,18 +3288,27 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
             if (status == 'disetujui' || status == 'terbit') FilledButton.icon(onPressed: () { Navigator.pop(sheetContext); _printApprovedLetter(data); }, icon: const Icon(Icons.picture_as_pdf_outlined), label: const Text('Cetak / Simpan PDF Surat')),
           ],
           if (kind == 'pengaduan') ...[
-            if (status == 'menunggu_validasi_rt' && _canReviewRt)
+            if (status.startsWith('perlu_perbaikan_') && (data['pemohonUid'] ?? '').toString() == _uid)
+              OutlinedButton.icon(onPressed: () { Navigator.pop(sheetContext); _resubmitComplaint(doc, data); }, icon: const Icon(Icons.refresh), label: const Text('Perbaiki dan kirim ulang')),
+            if (status == 'menunggu_validasi_rt' && _canReviewRt) ...[
               FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'menunggu_validasi_rw'); }, icon: const Icon(Icons.fact_check_outlined), label: const Text('Validasi RT & teruskan ke RW')),
-            if (status == 'menunggu_validasi_rw' && _canReviewRw)
+              OutlinedButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'perlu_perbaikan_rt'); }, icon: const Icon(Icons.edit_note), label: const Text('Minta perbaikan dari warga')),
+              TextButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'ditolak'); }, icon: const Icon(Icons.cancel_outlined), label: const Text('Tolak pengaduan')),
+            ],
+            if (status == 'menunggu_validasi_rw' && _canReviewRw) ...[
               FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'menunggu_validasi_kawil'); }, icon: const Icon(Icons.verified_outlined), label: const Text('Validasi RW & teruskan ke Kawil')),
-            if (status == 'menunggu_validasi_kawil' && _canReviewKawil)
+              OutlinedButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'perlu_perbaikan_rw'); }, icon: const Icon(Icons.edit_note), label: const Text('Minta perbaikan dari warga')),
+              TextButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'ditolak'); }, icon: const Icon(Icons.cancel_outlined), label: const Text('Tolak pengaduan')),
+            ],
+            if (status == 'menunggu_validasi_kawil' && _canReviewKawil) ...[
               FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'terverifikasi'); }, icon: const Icon(Icons.verified), label: const Text('Validasi akhir Kawil')),
+              OutlinedButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'perlu_perbaikan_kawil'); }, icon: const Icon(Icons.edit_note), label: const Text('Minta perbaikan dari warga')),
+              TextButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'ditolak'); }, icon: const Icon(Icons.cancel_outlined), label: const Text('Tolak pengaduan')),
+            ],
             if (status == 'terverifikasi' && _canReviewKawil)
               FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'ditindaklanjuti'); }, icon: const Icon(Icons.handyman_outlined), label: const Text('Mulai tindak lanjut')),
             if (status == 'ditindaklanjuti' && _canReviewKawil)
               OutlinedButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'selesai'); }, icon: const Icon(Icons.task_alt), label: const Text('Selesaikan (catatan wajib)')),
-            if (status.startsWith('menunggu_validasi_') && _staff)
-              TextButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeComplaintStatus(doc, 'ditolak'); }, icon: const Icon(Icons.cancel_outlined), label: const Text('Tolak pengaduan')),
           ],
           if (kind == 'laporan' && _canReviewRw && status == 'dikirim') FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await doc.reference.update({'status':'diverifikasi_rw','updatedAt':FieldValue.serverTimestamp(),'verifikasiRwOleh':_uid}); }, icon: const Icon(Icons.verified_outlined), label: const Text('Verifikasi laporan RW')),
           if (kind == 'laporan' && _canReviewKawil && status == 'diverifikasi_rw') FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await doc.reference.update({'status':'diterima_kawil','updatedAt':FieldValue.serverTimestamp(),'verifikasiKawilOleh':_uid}); }, icon: const Icon(Icons.verified), label: const Text('Terima laporan Kawil')),
