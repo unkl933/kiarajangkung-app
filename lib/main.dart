@@ -878,6 +878,7 @@ const modules = <ModuleInfo>[
   ModuleInfo('organisasi', 'Organisasi & Lembaga Kampung', 'Karang Taruna, PKK, Posyandu, kelompok tani dan lainnya', Icons.groups_2_outlined),
   ModuleInfo('pelayanan_masyarakat', 'Pelayanan Masyarakat', 'Surat online, pengaduan, kegiatan dan laporan RT/RW', Icons.volunteer_activism_outlined),
   ModuleInfo('koordinasi_wilayah', 'Koordinasi Wilayah', 'Instruksi, disposisi, rapat, forum dan pengumuman pengurus', Icons.account_tree_outlined),
+  ModuleInfo('panel_kawil', 'Dashboard Kepala Wilayah', 'Pemantauan RW, RT, data warga, surat dan pengaduan wilayah', Icons.dashboard_customize_outlined),
 ];
 
 class HomePage extends StatefulWidget {
@@ -1068,6 +1069,19 @@ class _HomePageState extends State<HomePage> {
         ),
         const SizedBox(height: 12),
         const DashboardAnnouncements(),
+        if (roles.contains('perangkat_kawil')) ...[
+          const SizedBox(height: 12),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: ListTile(
+              leading: const CircleAvatar(child: Icon(Icons.dashboard_customize_outlined)),
+              title: const Text('Panel Kepala Wilayah', style: TextStyle(fontWeight: FontWeight.w800)),
+              subtitle: const Text('Pantau RW, RT, data warga, surat dan pengaduan wilayah'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => openModule('panel_kawil'),
+            ),
+          ),
+        ],
         const SizedBox(height: 18),
         DashboardPopulationStats(isAdmin: isAdmin),
         const SizedBox(height: 16),
@@ -1955,6 +1969,7 @@ class ModulesPage extends StatelessWidget {
             roles.add((profile['role'] ?? 'warga').toString().toLowerCase());
             final staff = isAdmin || roles.any((r) => ['perangkat_kawil','ketua_rw','ketua_rt'].contains(r));
             if (m.keyName == 'koordinasi_wilayah') return true;
+            if (m.keyName == 'panel_kawil') return roles.contains('perangkat_kawil');
             return isAdmin || !['arsip_warga', 'migrasi_satu_data'].contains(m.keyName);
           }).map((m) => Card(
                 child: ListTile(
@@ -2703,6 +2718,456 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
 }
 
 
+
+// ============================================================
+// TAHAP 4 - DASHBOARD KEPALA WILAYAH (KAWIL)
+// Ringkasan wilayah, validasi data warga, dan akses cepat pelayanan.
+// ============================================================
+
+class KawilDashboardPage extends StatelessWidget {
+  const KawilDashboardPage({super.key});
+
+  Widget _metric(String title, IconData icon, Query<Map<String, dynamic>> query) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: query.snapshots(),
+      builder: (context, snapshot) => Card(
+        child: ListTile(
+          leading: CircleAvatar(child: Icon(icon)),
+          title: Text(title, style: const TextStyle(fontSize: 12)),
+          trailing: Text(snapshot.data?.size.toString() ?? '…',
+              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800)),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = Db.auth.currentUser?.uid ?? '';
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: Db.user(uid).snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Dashboard Kawil')),
+            body: Center(child: Text('Gagal membaca profil: ' + snapshot.error.toString())),
+          );
+        }
+        if (!snapshot.hasData) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        final profile = snapshot.data!.data() ?? <String, dynamic>{};
+        final roles = (profile['roles'] is List)
+            ? (profile['roles'] as List).map((e) => e.toString().toLowerCase()).toSet()
+            : <String>{};
+        roles.add((profile['role'] ?? 'warga').toString().toLowerCase());
+        if (!roles.contains('perangkat_kawil') &&
+            !roles.contains('owner') && !roles.contains('admin')) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Dashboard Kawil')),
+            body: const Center(child: Text('Menu ini hanya untuk Perangkat Kawil.')),
+          );
+        }
+
+        final kawilId = (profile['kawilId'] ?? '').toString();
+        final kawilNama = (profile['kawil'] ?? profile['kawilNama'] ?? 'Wilayah Kawil').toString();
+        if (kawilId.isEmpty && !roles.contains('owner') && !roles.contains('admin')) {
+          return Scaffold(
+            appBar: AppBar(title: const Text('Dashboard Kawil')),
+            body: const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'Akun Kawil belum memiliki wilayah tugas. Hubungi Owner untuk menetapkan wilayah Kawil pada akun ini.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          );
+        }
+
+        final rwScope = Db.module('wilayah_rw').where('kawilId', isEqualTo: kawilId);
+        final rtScope = Db.module('wilayah_rt').where('kawilId', isEqualTo: kawilId);
+        final suratScope = Db.module('pelayanan_surat').where('kawilId', isEqualTo: kawilId);
+        final pengaduanScope = Db.module('pengaduan').where('kawilId', isEqualTo: kawilId);
+        final laporanScope = Db.module('laporan_rt_bulanan').where('kawilId', isEqualTo: kawilId);
+        final wargaScope = Db.module('sensus').where('kawilId', isEqualTo: kawilId);
+
+        return Scaffold(
+          appBar: AppBar(title: const Text('Dashboard Kepala Wilayah')),
+          body: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Selamat bertugas,', style: TextStyle(fontSize: 12)),
+                      const SizedBox(height: 4),
+                      Text((profile['nama'] ?? 'Perangkat Kawil').toString(),
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 4),
+                      Text(kawilNama, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      const Text('Pantau administrasi dan pelayanan seluruh RW di wilayah tugas Anda.',
+                          style: TextStyle(fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text('Ringkasan wilayah', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 2,
+                childAspectRatio: 2.25,
+                children: [
+                  _metric('RW di wilayah', Icons.account_tree_outlined, rwScope),
+                  _metric('RT di wilayah', Icons.home_work_outlined, rtScope),
+                  _metric('Surat masuk', Icons.description_outlined, suratScope),
+                  _metric('Pengaduan', Icons.support_agent_outlined, pengaduanScope),
+                ],
+              ),
+              StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: wargaScope.snapshots(),
+                builder: (context, residentSnapshot) {
+                  final residents = residentSnapshot.data?.docs ?? [];
+                  final pending = residents.where((d) =>
+                      (d.data()['statusValidasi'] ?? 'menunggu').toString() != 'valid').length;
+                  return Card(
+                    child: ListTile(
+                      leading: const CircleAvatar(child: Icon(Icons.fact_check_outlined)),
+                      title: const Text('Data warga menunggu validasi'),
+                      subtitle: Text(residents.length.toString() + ' warga terdata di wilayah ini'),
+                      trailing: Text(pending.toString(),
+                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                      onTap: () => Navigator.push(context, MaterialPageRoute(
+                        builder: (_) => KawilResidentsPage(kawilId: kawilId, profile: profile),
+                      )),
+                    ),
+                  );
+                },
+              ),
+              _metric('Laporan bulanan RT', Icons.assessment_outlined, laporanScope),
+              const SizedBox(height: 12),
+              Text('Akses cepat', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.groups_outlined),
+                  title: const Text('Data Warga Wilayah'),
+                  subtitle: const Text('Lihat, perbaiki, dan validasi data warga seluruh RW'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => KawilResidentsPage(kawilId: kawilId, profile: profile),
+                  )),
+                ),
+              ),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.description_outlined),
+                  title: const Text('Administrasi & Pelayanan'),
+                  subtitle: const Text('Surat, pengaduan, kegiatan dan laporan RT'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => const PelayananMasyarakatPage(isAdmin: false),
+                  )),
+                ),
+              ),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.account_tree_outlined),
+                  title: const Text('Koordinasi Wilayah'),
+                  subtitle: const Text('Instruksi, tugas, rapat, forum dan pengumuman'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => const KoordinasiWilayahPage(isAdmin: false),
+                  )),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class KawilResidentsPage extends StatefulWidget {
+  final String kawilId;
+  final Map<String, dynamic> profile;
+  const KawilResidentsPage({super.key, required this.kawilId, required this.profile});
+
+  @override
+  State<KawilResidentsPage> createState() => _KawilResidentsPageState();
+}
+
+class _KawilResidentsPageState extends State<KawilResidentsPage> {
+  final TextEditingController _search = TextEditingController();
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  String _validationStatus(Map<String, dynamic> data) =>
+      (data['statusValidasi'] ?? 'menunggu').toString();
+
+  String _validationLabel(String status) => switch (status) {
+    'valid' => 'VALID',
+    'perlu_perbaikan' => 'PERLU PERBAIKAN',
+    _ => 'MENUNGGU VALIDASI',
+  };
+
+  Color _validationColor(String status) => switch (status) {
+    'valid' => Colors.green,
+    'perlu_perbaikan' => Colors.deepOrange,
+    _ => Colors.blueGrey,
+  };
+
+  Future<void> _edit(DocumentSnapshot<Map<String, dynamic>> doc) async {
+    final data = doc.data() ?? <String, dynamic>{};
+    if ((data['kawilId'] ?? '').toString() != widget.kawilId) {
+      showMessage(context, 'Data warga berada di luar wilayah tugas Anda.');
+      return;
+    }
+    final sensusModule = modules.firstWhere((m) => m.keyName == 'sensus');
+    await showRecordForm(
+      context,
+      sensusModule,
+      isAdmin: false,
+      isChair: true,
+      docId: doc.id,
+      initial: data,
+      onSaved: () async {
+        final uid = Db.auth.currentUser?.uid ?? '';
+        await doc.reference.update({
+          'statusValidasi': 'menunggu',
+          'catatanValidasi': 'Data berubah dan menunggu validasi ulang.',
+          'riwayatValidasi': FieldValue.arrayUnion([{
+            'status': 'menunggu',
+            'olehUid': uid,
+            'olehNama': (widget.profile['nama'] ?? 'Kawil').toString(),
+            'waktu': Timestamp.now(),
+            'catatan': 'Data warga diperbarui oleh Kawil; perlu validasi ulang.',
+          }]),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      },
+    );
+  }
+
+  Future<void> _setValidation(
+      DocumentSnapshot<Map<String, dynamic>> doc, String status) async {
+    final data = doc.data() ?? <String, dynamic>{};
+    if ((data['kawilId'] ?? '').toString() != widget.kawilId) {
+      showMessage(context, 'Data warga berada di luar wilayah tugas Anda.');
+      return;
+    }
+    String note = '';
+    if (status == 'perlu_perbaikan') {
+      final controller = TextEditingController();
+      final result = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Minta perbaikan data'),
+          content: TextField(
+            controller: controller,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(labelText: 'Catatan perbaikan', hintText: 'Jelaskan data yang perlu diperbaiki'),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+            FilledButton(onPressed: () {
+              if (controller.text.trim().isNotEmpty) Navigator.pop(ctx, controller.text.trim());
+            }, child: const Text('Kirim catatan')),
+          ],
+        ),
+      );
+      controller.dispose();
+      if (result == null || result.isEmpty) return;
+      note = result;
+    } else {
+      note = 'Data warga telah diperiksa dan dinyatakan valid oleh Kawil.';
+    }
+
+    try {
+      final uid = Db.auth.currentUser?.uid ?? '';
+      await doc.reference.update({
+        'statusValidasi': status,
+        'catatanValidasi': note,
+        'divalidasiOlehUid': uid,
+        'divalidasiOlehNama': (widget.profile['nama'] ?? 'Kawil').toString(),
+        'divalidasiPada': FieldValue.serverTimestamp(),
+        'riwayatValidasi': FieldValue.arrayUnion([{
+          'status': status,
+          'olehUid': uid,
+          'olehNama': (widget.profile['nama'] ?? 'Kawil').toString(),
+          'waktu': Timestamp.now(),
+          'catatan': note,
+        }]),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      if (mounted) showMessage(context, status == 'valid' ? 'Data warga berhasil divalidasi.' : 'Catatan perbaikan berhasil dikirim.');
+    } catch (e) {
+      if (mounted) showMessage(context, 'Gagal memperbarui validasi: ' + e.toString());
+    }
+  }
+
+  Future<void> _detail(DocumentSnapshot<Map<String, dynamic>> doc) async {
+    final data = doc.data() ?? <String, dynamic>{};
+    final status = _validationStatus(data);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text((data['nama'] ?? 'Data warga').toString(),
+                  style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              Text('NIK: ' + (data['nik'] ?? '-').toString()),
+              Text('No. KK: ' + (data['noKK'] ?? '-').toString()),
+              Text('Alamat: ' + (data['alamat'] ?? '-').toString()),
+              Text('RT ' + (data['rt'] ?? '-').toString() + ' / RW ' + (data['rw'] ?? '-').toString()),
+              const SizedBox(height: 8),
+              Chip(
+                avatar: Icon(Icons.circle, size: 10, color: _validationColor(status)),
+                label: Text(_validationLabel(status)),
+              ),
+              if ((data['catatanValidasi'] ?? '').toString().trim().isNotEmpty)
+                Text('Catatan: ' + data['catatanValidasi'].toString()),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _edit(doc);
+                },
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Edit data warga'),
+              ),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _setValidation(doc, 'valid');
+                },
+                icon: const Icon(Icons.verified_outlined),
+                label: const Text('Validasi data'),
+              ),
+              TextButton.icon(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _setValidation(doc, 'perlu_perbaikan');
+                },
+                icon: const Icon(Icons.edit_note_outlined),
+                label: const Text('Minta perbaikan'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Data Warga Wilayah Kawil')),
+    body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: Db.module('sensus').where('kawilId', isEqualTo: widget.kawilId).snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) return Center(child: Text('Gagal memuat data warga: ' + snapshot.error.toString()));
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        final docs = snapshot.data!.docs.toList()
+          ..sort((a, b) => (a.data()['nama'] ?? '').toString().toLowerCase()
+              .compareTo((b.data()['nama'] ?? '').toString().toLowerCase()));
+        final query = _search.text.trim().toLowerCase();
+        final filtered = docs.where((doc) {
+          final d = doc.data();
+          final haystack = [
+            d['nama'], d['nik'], d['noKK'], d['alamat'], d['rt'], d['rw'],
+          ].where((v) => v != null).join(' ').toLowerCase();
+          return query.isEmpty || haystack.contains(query);
+        }).toList();
+        final pending = docs.where((d) => _validationStatus(d.data()) != 'valid').length;
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+              child: TextField(
+                controller: _search,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.search),
+                  hintText: 'Cari nama, NIK, No. KK, alamat, RT atau RW',
+                  suffixIcon: _search.text.isEmpty ? null : IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: () { _search.clear(); setState(() {}); },
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(docs.length.toString() + ' warga • ' + pending.toString() + ' menunggu validasi',
+                    style: Theme.of(context).textTheme.bodySmall),
+              ),
+            ),
+            Expanded(
+              child: filtered.isEmpty
+                  ? const Center(child: Text('Data warga tidak ditemukan.'))
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) {
+                        final doc = filtered[index];
+                        final d = doc.data();
+                        final status = _validationStatus(d);
+                        final archived = isArchivedResident(d);
+                        return Card(
+                          child: ListTile(
+                            onTap: () => _detail(doc),
+                            leading: CircleAvatar(
+                              child: Icon(archived ? Icons.archive_outlined : Icons.person_outline),
+                            ),
+                            title: Text((d['nama'] ?? 'Tanpa nama').toString(),
+                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                            subtitle: Text(
+                              'RT ' + (d['rt'] ?? '-').toString() +
+                              ' / RW ' + (d['rw'] ?? '-').toString() +
+                              ' • ' + _validationLabel(status) +
+                              (archived ? ' • ARSIP' : ''),
+                              maxLines: 2,
+                            ),
+                            trailing: Icon(Icons.chevron_right, color: _validationColor(status)),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+
 // ============================================================
 // TAHAP 3 - KOORDINASI WILAYAH
 // Instruksi berjenjang, disposisi/tugas, rapat, forum, pengumuman.
@@ -3234,6 +3699,9 @@ class _ModulePageState extends State<ModulePage> {
     if (module.keyName == 'koordinasi_wilayah') {
       return KoordinasiWilayahPage(isAdmin: isAdmin);
     }
+    if (module.keyName == 'panel_kawil') {
+      return const KawilDashboardPage();
+    }
     if (module.keyName == 'informasi_diri') {
       return const InformasiDiriPage();
     }
@@ -3647,6 +4115,7 @@ Future<void> showRecordForm(
   bool isChair = false,
   String? docId,
   Map<String, dynamic>? initial,
+  Future<void> Function()? onSaved,
 }) async {
   if (!isAdmin && !isChair) return;
   final currentUid = Db.auth.currentUser?.uid;
@@ -3766,7 +4235,8 @@ Future<void> showRecordForm(
                     ),
                   const SizedBox(height: 10),
                   ...definitions.where((field) => field.key != 'fotoUrl' && field.key != 'ketuaUid' &&
-                      !(module.keyName == 'sensus' && ['statusArsip','tanggalArsip','alamatTujuan'].contains(field.key) && (controllers['statusWarga']?.text ?? 'Aktif') != 'Arsip')).map((field) {
+                      !(module.keyName == 'sensus' && ['statusArsip','tanggalArsip','alamatTujuan'].contains(field.key) && (controllers['statusWarga']?.text ?? 'Aktif') != 'Arsip') &&
+                      !(isChair && module.keyName == 'sensus' && ['statusWarga','statusArsip','tanggalArsip','alamatTujuan'].contains(field.key))).map((field) {
                     if (isAdmin && module.keyName == 'organisasi' && field.key == 'anggota') {
                       return Padding(padding: const EdgeInsets.only(bottom: 10), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Text(field.label, style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -3825,7 +4295,8 @@ Future<void> showRecordForm(
                     }
                     return Padding(padding: const EdgeInsets.only(bottom: 10), child: TextFormField(
                       controller: controllers[field.key], keyboardType: field.keyboard, maxLines: field.lines,
-                      readOnly: module.keyName == 'sensus' && field.key == 'nik' && docId != null,
+                      readOnly: module.keyName == 'sensus' && docId != null &&
+                          (field.key == 'nik' || (isChair && ['kawil','rw','rt'].contains(field.key))),
                       validator: field.required ? (v) => v == null || v.trim().isEmpty ? '${field.label} wajib diisi' : null : null,
                       decoration: InputDecoration(labelText: field.label, hintText: field.hint.isEmpty ? null : field.hint, alignLabelWithHint: field.lines > 1, suffixIcon: module.keyName == 'sensus' && field.key == 'nik' && docId != null ? const Icon(Icons.lock_outline, size: 18) : null),
                     ));
@@ -4183,6 +4654,7 @@ Future<void> showRecordForm(
                             await writeWargaAudit(wargaId: (entry.value['wargaId'] ?? '').toString(), modul: module.keyName, aksi: 'diperbarui', peran: entry.key, namaWarga: (entry.value['nama'] ?? '').toString(), recordId: docId);
                           }
                         }
+                        if (docId != null && onSaved != null) await onSaved();
                         if (sheetContext.mounted) Navigator.pop(sheetContext);
                         if (context.mounted && module.keyName != 'sensus') showMessage(context, 'Data berhasil disimpan.');
                       } catch (e) {
