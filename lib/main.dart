@@ -4106,7 +4106,8 @@ class ModulePage extends StatefulWidget {
   final ModuleInfo module;
   final bool isAdmin;
   final Map<String, dynamic> profile;
-  const ModulePage({super.key, required this.module, required this.isAdmin, this.profile = const {}});
+  final bool rawView;
+  const ModulePage({super.key, required this.module, required this.isAdmin, this.profile = const {}, this.rawView = false});
 
   @override
   State<ModulePage> createState() => _ModulePageState();
@@ -4137,7 +4138,8 @@ class _ModulePageState extends State<ModulePage> {
   Widget build(BuildContext context) {
     final module = widget.module;
     final isAdmin = widget.isAdmin;
-    if (module.keyName == 'darurat') return EmergencyCenterPage(profile: widget.profile, isAdmin: isAdmin);\n    if (module.keyName == 'pengumuman' && !widget.rawView) return InformasiKampungPage(isAdmin: isAdmin, profile: widget.profile);
+    if (module.keyName == 'darurat') return EmergencyCenterPage(profile: widget.profile, isAdmin: isAdmin);
+    if (module.keyName == 'pengumuman' && !widget.rawView) return InformasiKampungPage(isAdmin: isAdmin, profile: widget.profile);
     if (module.keyName == 'profil_kampung') {
       return ProfileKampungPage(isAdmin: isAdmin);
     }
