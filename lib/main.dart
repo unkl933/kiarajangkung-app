@@ -1187,7 +1187,7 @@ class _AccountRequestsPageState extends State<AccountRequestsPage> {
           ])));
         });
       },
-    )));
+    ));
   }
 }
 class HomePage extends StatefulWidget {
