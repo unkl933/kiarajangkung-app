@@ -231,14 +231,23 @@ function s6OwnSosNotificationCreate() {
           get(s3TaskPath(data.get('referensiId', ''))).data.get('dibuatOlehUid', '') == request.auth.uid)));
     }
     function s3CanAddProgress(data) {
-      return s3Admin() || (s3Staff() && data.get('dibuatOlehUid', '') == request.auth.uid &&
-        data.get('tugasId', '') is string && exists(s3TaskPath(data.get('tugasId', ''))) &&
-        s3OwnScope(data) && (
-          (get(s3TaskPath(data.get('tugasId', ''))).data.get('targetLevel', '') == 'rw' &&
-           s3HasRole('ketua_rw') && get(s3TaskPath(data.get('tugasId', ''))).data.get('targetId', '') == s3Profile().get('rwId', '')) ||
-          (get(s3TaskPath(data.get('tugasId', ''))).data.get('targetLevel', '') == 'rt' &&
-           s3HasRole('ketua_rt') && get(s3TaskPath(data.get('tugasId', ''))).data.get('targetId', '') == s3Profile().get('rtId', ''))
-        ));
+      return s3Admin() || (
+        s3Staff() &&
+        data.get('dibuatOlehUid', '') == request.auth.uid &&
+        data.get('tugasId', '') is string &&
+        exists(s3TaskPath(data.get('tugasId', ''))) &&
+        s3ProgressMatchesTask(data, get(s3TaskPath(data.get('tugasId', ''))).data)
+      );
+    }
+    function s3ProgressMatchesTask(data, task) {
+      return s3OwnScope(data) && (
+        (task.get('targetLevel', '') == 'rw' &&
+         s3HasRole('ketua_rw') &&
+         task.get('targetId', '') == s3Profile().get('rwId', '')) ||
+        (task.get('targetLevel', '') == 'rt' &&
+         s3HasRole('ketua_rt') &&
+         task.get('targetId', '') == s3Profile().get('rtId', ''))
+      );
     }
     function s3OwnMessage(data) {
       return s3Staff() && data.get('dibuatOlehUid', '') == request.auth.uid && s3OwnScope(data);
