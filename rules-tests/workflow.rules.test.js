@@ -369,7 +369,7 @@ test('warga tidak dapat membaca laporan RT bulanan lintas wilayah', async () => 
   await assertFails(getDocs(collection(db, root, 'laporan_rt_bulanan')));
 });
 
-test('Admin dapat membaca permintaan akun semua wilayah, Ketua RT hanya wilayahnya', async () => {
+test('Owner dan Admin dapat membaca permintaan akun semua wilayah, Ketua RT hanya wilayahnya', async () => {
   await env.withSecurityRulesDisabled(async context => {
     const db = context.firestore();
     await setDoc(doc(db, root, 'permintaan_akun', 'request-rt-1'), {
@@ -390,7 +390,8 @@ test('Admin dapat membaca permintaan akun semua wilayah, Ketua RT hanya wilayahn
   await assertFails(getDoc(doc(rtDb, root, 'permintaan_akun', 'request-rt-2')));
   await assertFails(getDoc(doc(wrongRtDb, root, 'permintaan_akun', 'request-rt-1')));
   await assertSucceeds(getDoc(doc(adminDb, root, 'permintaan_akun', 'request-rt-2')));
-  await assertFails(getDoc(doc(ownerDb, root, 'permintaan_akun', 'request-rt-1')));
+  await assertSucceeds(getDoc(doc(ownerDb, root, 'permintaan_akun', 'request-rt-1')));
+  await assertSucceeds(getDoc(doc(ownerDb, root, 'permintaan_akun', 'request-rt-2')));
   await assertSucceeds(getDoc(doc(adminDb, root, 'riwayat_akun', 'history-1')));
   await assertSucceeds(getDoc(doc(ownerDb, root, 'riwayat_akun', 'history-1')));
   await assertFails(getDoc(doc(rtDb, root, 'riwayat_akun', 'history-1')));
