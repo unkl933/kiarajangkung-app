@@ -112,6 +112,13 @@ test('anggota regu dapat membaca absensi anggota lain dalam regu yang sama', asy
   await assertSucceeds(getDoc(doc(db, root, 'ronda_absensi', 'absensi-b')));
 });
 
+test('anggota regu dapat membaca daftar absensi regunya saja', async () => {
+  const db = env.authenticatedContext('wargaA').firestore();
+  const q = query(collection(db, root, 'ronda_absensi'), where('scheduleId', '==', 'ronda-1'));
+  const result = await assertSucceeds(getDocs(q));
+  assert.equal(result.size, 2);
+});
+
 test('warga tidak dapat membaca absensi regu lain', async () => {
   const db = env.authenticatedContext('wargaA').firestore();
   await assertFails(getDoc(doc(db, root, 'ronda_absensi', 'absensi-lain')));
