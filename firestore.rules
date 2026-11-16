@@ -395,28 +395,61 @@ match /kampung/kiarajangkung/pelayanan_surat/{suratId} {
   allow delete: if s2Admin();
 }
 
+function s2ComplaintHistoryAppended() {
+  let oldHistory = resource.data.get('riwayatStatus', []);
+  let newHistory = request.resource.data.get('riwayatStatus', []);
+  let lastEntry = newHistory[newHistory.size() - 1];
+  return oldHistory is list && newHistory is list &&
+    newHistory.size() == oldHistory.size() + 1 &&
+    newHistory.hasAll(oldHistory) &&
+    lastEntry.get('olehUid', '') == request.auth.uid &&
+    lastEntry.get('status', '') == request.resource.data.get('status', '');
+}
+
+function s2ComplaintHasReason() {
+  return request.resource.data.get('catatanPetugas', '') is string &&
+    request.resource.data.get('catatanPetugas', '').size() > 0;
+}
+
 function s2CanUpdateComplaint() {
   let changed = request.resource.data.diff(resource.data).affectedKeys();
   let nextStatus = request.resource.data.get('status', resource.data.get('status', ''));
   let currentStatus = resource.data.get('status', '');
   let allowedFields = changed.hasOnly([
+    'judul', 'kategori', 'prioritas', 'uraian', 'lokasi', 'catatanPemohon',
     'status', 'tanggapan', 'catatanPetugas', 'updatedAt', 'riwayatStatus',
     'catatanPenyelesaian', 'diselesaikanOlehUid', 'diselesaikanOlehNama', 'diselesaikanPada'
   ]);
   let rtAdvance = s2HasRole('ketua_rt') &&
-    currentStatus == 'menunggu_validasi_rt' && nextStatus in ['menunggu_validasi_rw', 'ditolak'];
+    currentStatus == 'menunggu_validasi_rt' && nextStatus == 'menunggu_validasi_rw';
   let rwAdvance = s2HasRole('ketua_rw') &&
-    currentStatus == 'menunggu_validasi_rw' && nextStatus in ['menunggu_validasi_kawil', 'ditolak'];
+    currentStatus == 'menunggu_validasi_rw' && nextStatus == 'menunggu_validasi_kawil';
   let kawilAdvance = s2HasRole('perangkat_kawil') && (
-    (currentStatus == 'menunggu_validasi_kawil' && nextStatus in ['terverifikasi', 'ditolak']) ||
+    (currentStatus == 'menunggu_validasi_kawil' && nextStatus == 'terverifikasi') ||
     (currentStatus == 'terverifikasi' && nextStatus == 'ditindaklanjuti') ||
     (currentStatus == 'ditindaklanjuti' && nextStatus == 'selesai' &&
       request.resource.data.get('catatanPenyelesaian', '') is string &&
       request.resource.data.get('catatanPenyelesaian', '').size() > 0 &&
       request.resource.data.get('diselesaikanOlehUid', '') == request.auth.uid)
   );
-  return s2SignedIn() && s2InArea(resource.data) && allowedFields &&
-    (s2Admin() || rtAdvance || rwAdvance || kawilAdvance);
+  let rtReturn = s2HasRole('ketua_rt') && currentStatus == 'menunggu_validasi_rt' &&
+    nextStatus in ['perlu_perbaikan_rt', 'ditolak'] && s2ComplaintHasReason();
+  let rwReturn = s2HasRole('ketua_rw') && currentStatus == 'menunggu_validasi_rw' &&
+    nextStatus in ['perlu_perbaikan_rw', 'ditolak'] && s2ComplaintHasReason();
+  let kawilReturn = s2HasRole('perangkat_kawil') && currentStatus == 'menunggu_validasi_kawil' &&
+    nextStatus in ['perlu_perbaikan_kawil', 'ditolak'] && s2ComplaintHasReason();
+  let wargaResubmit = resource.data.get('pemohonUid', '') == request.auth.uid &&
+    ((currentStatus == 'perlu_perbaikan_rt' && nextStatus == 'menunggu_validasi_rt') ||
+     (currentStatus == 'perlu_perbaikan_rw' && nextStatus == 'menunggu_validasi_rw') ||
+     (currentStatus == 'perlu_perbaikan_kawil' && nextStatus == 'menunggu_validasi_kawil')) &&
+    s2OwnScopedCreate();
+  let adminUpdate = s2Admin() &&
+    (nextStatus != 'ditolak' && !nextStatus.startsWith('perlu_perbaikan_') || s2ComplaintHasReason());
+  return s2SignedIn() && allowedFields && s2ComplaintHistoryAppended() && (
+    (s2InArea(resource.data) && (rtAdvance || rwAdvance || kawilAdvance ||
+      rtReturn || rwReturn || kawilReturn)) ||
+    wargaResubmit || adminUpdate
+  );
 }
 
 match /kampung/kiarajangkung/pengaduan/{pengaduanId} {
