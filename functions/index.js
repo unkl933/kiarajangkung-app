@@ -1,4 +1,4 @@
-const { onDocumentWritten } = require('firebase-functions/v2/firestore');
+const { onDocumentWritten, onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 admin.initializeApp();
@@ -152,10 +152,18 @@ exports.sosNotificationCreated = onDocumentCreated(
           : [String(user.role || '').toLowerCase()];
         if (!roles.some(role => targetRoles.includes(role))) continue;
 
-        const sameArea = targetArea.every(key => {
+        const isGlobalManager = roles.includes('admin') || roles.includes('owner');
+        const requiredAreaKeys = roles.includes('ketua_rt')
+          ? targetArea
+          : roles.includes('ketua_rw')
+            ? ['kawilId', 'rwId']
+            : roles.includes('perangkat_kawil')
+              ? ['kawilId']
+              : [];
+        const sameArea = isGlobalManager || requiredAreaKeys.every(key => {
           const requested = String(data[key] || '').trim();
-          const actual = String(user[key] || '').trim();
-          return !requested || !actual || requested === actual;
+          if (!requested) return true;
+          return String(user[key] || '').trim() === requested;
         });
         if (!sameArea) continue;
 
