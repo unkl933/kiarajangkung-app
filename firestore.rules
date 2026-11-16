@@ -323,6 +323,23 @@ function s6OwnSosNotificationCreate() {
       allow delete: if false;
     }
 
+    // Permintaan akun hanya dapat dibaca Admin atau Ketua RT sesuai wilayah.
+    // Penulisan seluruh permintaan dan riwayat dilakukan oleh backend Apps Script.
+    match /kampung/kiarajangkung/permintaan_akun/{requestId} {
+      allow read: if signedIn() && (
+        isAdmin() ||
+        (hasRole('ketua_rt') &&
+          resource.data.get('rtId', '') == userData().get('rtId', ''))
+      );
+      allow create, update, delete: if false;
+    }
+
+    // Riwayat pendaftaran dan reset akun hanya untuk audit pengelola.
+    match /kampung/kiarajangkung/riwayat_akun/{historyId} {
+      allow read: if isOwnerOrAdmin();
+      allow create, update, delete: if false;
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isOwnerOrAdmin());
       // Provisioning akun oleh Admin/Owner melalui Code.gs. Admin hanya boleh
