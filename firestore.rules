@@ -421,10 +421,13 @@ function s2CanUpdateComplaint() {
     'catatanPenyelesaian', 'diselesaikanOlehUid', 'diselesaikanOlehNama', 'diselesaikanPada'
   ]);
   let rtAdvance = s2HasRole('ketua_rt') &&
+    resource.data.get('rtId', '') == s2Profile().get('rtId', '') &&
     currentStatus == 'menunggu_validasi_rt' && nextStatus == 'menunggu_validasi_rw';
   let rwAdvance = s2HasRole('ketua_rw') &&
+    resource.data.get('rwId', '') == s2Profile().get('rwId', '') &&
     currentStatus == 'menunggu_validasi_rw' && nextStatus == 'menunggu_validasi_kawil';
-  let kawilAdvance = s2HasRole('perangkat_kawil') && (
+  let kawilAdvance = s2HasRole('perangkat_kawil') &&
+    resource.data.get('kawilId', '') == s2Profile().get('kawilId', '') && (
     (currentStatus == 'menunggu_validasi_kawil' && nextStatus == 'terverifikasi') ||
     (currentStatus == 'terverifikasi' && nextStatus == 'ditindaklanjuti') ||
     (currentStatus == 'ditindaklanjuti' && nextStatus == 'selesai' &&
@@ -432,11 +435,11 @@ function s2CanUpdateComplaint() {
       request.resource.data.get('catatanPenyelesaian', '').size() > 0 &&
       request.resource.data.get('diselesaikanOlehUid', '') == request.auth.uid)
   );
-  let rtReturn = s2HasRole('ketua_rt') && currentStatus == 'menunggu_validasi_rt' &&
+  let rtReturn = s2HasRole('ketua_rt') && resource.data.get('rtId', '') == s2Profile().get('rtId', '') && currentStatus == 'menunggu_validasi_rt' &&
     nextStatus in ['perlu_perbaikan_rt', 'ditolak'] && s2ComplaintHasReason();
-  let rwReturn = s2HasRole('ketua_rw') && currentStatus == 'menunggu_validasi_rw' &&
+  let rwReturn = s2HasRole('ketua_rw') && resource.data.get('rwId', '') == s2Profile().get('rwId', '') && currentStatus == 'menunggu_validasi_rw' &&
     nextStatus in ['perlu_perbaikan_rw', 'ditolak'] && s2ComplaintHasReason();
-  let kawilReturn = s2HasRole('perangkat_kawil') && currentStatus == 'menunggu_validasi_kawil' &&
+  let kawilReturn = s2HasRole('perangkat_kawil') && resource.data.get('kawilId', '') == s2Profile().get('kawilId', '') && currentStatus == 'menunggu_validasi_kawil' &&
     nextStatus in ['perlu_perbaikan_kawil', 'ditolak'] && s2ComplaintHasReason();
   let wargaResubmit = resource.data.get('pemohonUid', '') == request.auth.uid &&
     ((currentStatus == 'perlu_perbaikan_rt' && nextStatus == 'menunggu_validasi_rt') ||
