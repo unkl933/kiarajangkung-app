@@ -264,7 +264,7 @@ function complaintRecipients(users, complaint, nextStatus, previousStatus) {
     const authorUid = String(complaint.pemohonUid || '');
     const author = users.docs.find(doc => doc.id === authorUid);
     if (author && ['menunggu_validasi_rw', 'menunggu_validasi_kawil', 'terverifikasi',
-      'ditindaklanjuti', 'selesai', 'ditolak'].includes(nextStatus)) {
+      'ditindaklanjuti', 'selesai', 'ditolak', 'perlu_perbaikan_rt', 'perlu_perbaikan_rw', 'perlu_perbaikan_kawil'].includes(nextStatus)) {
       add(author, author.data() || {});
     }
   }
@@ -291,6 +291,9 @@ exports.complaintNotificationChanged = onDocumentWritten(
       terverifikasi: ['Pengaduan Terverifikasi', 'Pengaduan Anda telah melewati validasi berjenjang.'],
       ditindaklanjuti: ['Pengaduan Ditindaklanjuti', 'Pengaduan Anda mulai ditangani oleh Kawil.'],
       selesai: ['Pengaduan Selesai', 'Pengaduan Anda telah diselesaikan. Buka aplikasi untuk melihat catatan penyelesaian.'],
+      perlu_perbaikan_rt: ['Pengaduan Perlu Diperbaiki', 'Ketua RT meminta perbaikan pada pengaduan Anda. Buka aplikasi untuk melihat alasannya.'],
+      perlu_perbaikan_rw: ['Pengaduan Perlu Diperbaiki', 'Ketua RW meminta perbaikan pada pengaduan Anda. Buka aplikasi untuk melihat alasannya.'],
+      perlu_perbaikan_kawil: ['Pengaduan Perlu Diperbaiki', 'Kawil meminta perbaikan pada pengaduan Anda. Buka aplikasi untuk melihat alasannya.'],
       ditolak: ['Pengaduan Tidak Dapat Dilanjutkan', 'Pengaduan Anda memerlukan perhatian. Buka aplikasi untuk melihat keterangannya.']
     };
     const [title, body] = messages[nextStatus] || ['Pembaruan Pengaduan', 'Ada pembaruan pada pengaduan Anda.'];
