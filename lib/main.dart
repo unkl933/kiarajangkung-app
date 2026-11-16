@@ -1219,13 +1219,17 @@ class _HomePageState extends State<HomePage> {
   bool get canReviewAccountRequests {
     final roles = (widget.profile['roles'] is List)
         ? (widget.profile['roles'] as List).map((e) => e.toString().toLowerCase()).toSet()
-        : <String>{(widget.profile['role'] ?? widget.role).toString().toLowerCase()};
+        : <String>{};
+    final primaryRole = (widget.profile['role'] ?? widget.role).toString().toLowerCase();
+    if (primaryRole.isNotEmpty) roles.add(primaryRole);
     return roles.contains('admin') || roles.contains('ketua_rt');
   }
   bool get isAccountRequestAdmin {
     final roles = (widget.profile['roles'] is List)
         ? (widget.profile['roles'] as List).map((e) => e.toString().toLowerCase()).toSet()
-        : <String>{(widget.profile['role'] ?? widget.role).toString().toLowerCase()};
+        : <String>{};
+    final primaryRole = (widget.profile['role'] ?? widget.role).toString().toLowerCase();
+    if (primaryRole.isNotEmpty) roles.add(primaryRole);
     return roles.contains('admin');
   }
 
