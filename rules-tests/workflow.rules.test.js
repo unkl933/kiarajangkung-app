@@ -8,7 +8,7 @@ import {
   assertSucceeds,
   assertFails,
 } from '@firebase/rules-unit-testing';
-import { collection, doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
+import { arrayUnion, collection, doc, getDoc, getDocs, setDoc, updateDoc } from 'firebase/firestore';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rules = fs.readFileSync(path.resolve(__dirname, '../firestore.rules'), 'utf8');
@@ -26,6 +26,13 @@ const profiles = {
   admin: { role: 'admin', kawilId: '', rwId: '', rtId: '' },
   owner: { role: 'owner', kawilId: '', rwId: '', rtId: '' },
 };
+
+const complaintStep = (status, uid, catatan = 'Pengujian alur') => ({ status, olehUid: uid, olehNama: uid, waktu: new Date(), catatan });
+
+const updateComplaint = (db, id, uid, status, extra = {}) => updateDoc(
+  doc(db, root, 'pengaduan', id),
+  { status, riwayatStatus: arrayUnion(complaintStep(status, uid)), ...extra },
+);
 
 const scoped = (uid, extra = {}) => ({
   pemohonUid: uid,
@@ -64,6 +71,7 @@ async function seed() {
       judul: 'Lampu jalan mati',
       uraian: 'Lampu jalan dekat balai mati',
       status: 'menunggu_validasi_rt',
+      riwayatStatus: [complaintStep('menunggu_validasi_rt', 'wargaA', 'Pengaduan dibuat')],
     });
     await setDoc(doc(db, root, 'laporan_rt_bulanan', 'laporan-rt-1'), {
       kawilId: 'kw-1',
@@ -176,18 +184,75 @@ test('validasi pengaduan wajib berjenjang RT lalu RW lalu Kawil', async () => {
   const rwDb = env.authenticatedContext('rw').firestore();
   const kawilDb = env.authenticatedContext('kawil').firestore();
   const ref = doc(rtDb, root, 'pengaduan', 'aduan-warga-a');
-  await assertSucceeds(updateDoc(ref, { status: 'menunggu_validasi_rw', tanggapan: 'Diperiksa RT' }));
+  await assertSucceeds(updateComplaint(rtDb, 'aduan-warga-a', 'rt', 'menunggu_validasi_rw', { tanggapan: 'Diperiksa RT' }));
   await assertFails(updateDoc(doc(kawilDb, root, 'pengaduan', 'aduan-warga-a'), { status: 'terverifikasi' }));
-  await assertSucceeds(updateDoc(doc(rwDb, root, 'pengaduan', 'aduan-warga-a'), { status: 'menunggu_validasi_kawil', tanggapan: 'Diperiksa RW' }));
-  await assertSucceeds(updateDoc(doc(kawilDb, root, 'pengaduan', 'aduan-warga-a'), { status: 'terverifikasi', tanggapan: 'Validasi akhir Kawil' }));
-  await assertSucceeds(updateDoc(doc(kawilDb, root, 'pengaduan', 'aduan-warga-a'), { status: 'ditindaklanjuti', tanggapan: 'Mulai ditangani' }));
+  await assertSucceeds(updateComplaint(rwDb, 'aduan-warga-a', 'rw', 'menunggu_validasi_kawil', { tanggapan: 'Diperiksa RW' }));
+  await assertSucceeds(updateComplaint(kawilDb, 'aduan-warga-a', 'kawil', 'terverifikasi', { tanggapan: 'Validasi akhir Kawil' }));
+  await assertSucceeds(updateComplaint(kawilDb, 'aduan-warga-a', 'kawil', 'ditindaklanjuti', { tanggapan: 'Mulai ditangani' }));
   await assertFails(updateDoc(doc(kawilDb, root, 'pengaduan', 'aduan-warga-a'), { status: 'selesai' }));
-  await assertSucceeds(updateDoc(doc(kawilDb, root, 'pengaduan', 'aduan-warga-a'), {
-    status: 'selesai', catatanPenyelesaian: 'Lampu jalan sudah diperbaiki',
+  await assertSucceeds(updateComplaint(kawilDb, 'aduan-warga-a', 'kawil', 'selesai', {
+    catatanPenyelesaian: 'Lampu jalan sudah diperbaiki',
     diselesaikanOlehUid: 'kawil', diselesaikanOlehNama: 'Petugas Kawil',
   }));
   await assertFails(updateDoc(ref, { pemohonUid: 'rt' }));
 });
+test('RT dapat meminta perbaikan dengan alasan wajib dan warga mengirim ulang ke tahap RT', async () => {
+  const rtDb = env.authenticatedContext('rt').firestore();
+  const wargaDb = env.authenticatedContext('wargaA').firestore();
+  const ref = doc(rtDb, root, 'pengaduan', 'aduan-warga-a');
+  await assertFails(updateDoc(ref, {
+    status: 'perlu_perbaikan_rt',
+    catatanPetugas: '',
+    riwayatStatus: arrayUnion(complaintStep('perlu_perbaikan_rt', 'rt')),
+  }));
+  await assertSucceeds(updateDoc(ref, {
+    status: 'perlu_perbaikan_rt',
+    catatanPetugas: 'Mohon lengkapi lokasi kejadian',
+    tanggapan: 'Mohon lengkapi lokasi kejadian',
+    riwayatStatus: arrayUnion(complaintStep('perlu_perbaikan_rt', 'rt', 'Mohon lengkapi lokasi kejadian')),
+  }));
+  await assertSucceeds(updateDoc(doc(wargaDb, root, 'pengaduan', 'aduan-warga-a'), {
+    uraian: 'Lampu jalan di dekat balai kampung mati',
+    lokasi: 'Dekat balai kampung',
+    status: 'menunggu_validasi_rt',
+    riwayatStatus: arrayUnion(complaintStep('menunggu_validasi_rt', 'wargaA', 'Pengaduan diperbaiki')),
+  }));
+});
+
+test('RW dan Kawil hanya dapat meminta perbaikan pada tahap kewenangannya', async () => {
+  const rtDb = env.authenticatedContext('rt').firestore();
+  const rwDb = env.authenticatedContext('rw').firestore();
+  const kawilDb = env.authenticatedContext('kawil').firestore();
+  const id = 'aduan-warga-a';
+  await assertFails(updateDoc(doc(rwDb, root, 'pengaduan', id), {
+    status: 'perlu_perbaikan_rw', catatanPetugas: 'Perbaiki',
+    riwayatStatus: arrayUnion(complaintStep('perlu_perbaikan_rw', 'rw')),
+  }));
+  await assertSucceeds(updateComplaint(rtDb, id, 'rt', 'menunggu_validasi_rw'));
+  await assertSucceeds(updateDoc(doc(rwDb, root, 'pengaduan', id), {
+    status: 'perlu_perbaikan_rw', catatanPetugas: 'Mohon perjelas uraian',
+    riwayatStatus: arrayUnion(complaintStep('perlu_perbaikan_rw', 'rw')),
+  }));
+  await assertSucceeds(updateDoc(doc(env.authenticatedContext('wargaA').firestore(), root, 'pengaduan', id), {
+    status: 'menunggu_validasi_rw',
+    riwayatStatus: arrayUnion(complaintStep('menunggu_validasi_rw', 'wargaA')),
+  }));
+  await assertSucceeds(updateComplaint(rwDb, id, 'rw', 'menunggu_validasi_kawil'));
+  await assertSucceeds(updateDoc(doc(kawilDb, root, 'pengaduan', id), {
+    status: 'perlu_perbaikan_kawil', catatanPetugas: 'Mohon lengkapi bukti lokasi',
+    riwayatStatus: arrayUnion(complaintStep('perlu_perbaikan_kawil', 'kawil')),
+  }));
+});
+
+test('riwayat pengaduan tidak dapat dihapus atau diubah oleh warga', async () => {
+  const wargaDb = env.authenticatedContext('wargaA').firestore();
+  const ref = doc(wargaDb, root, 'pengaduan', 'aduan-warga-a');
+  await assertFails(updateDoc(ref, { riwayatStatus: [] }));
+  await assertFails(updateDoc(ref, {
+    riwayatStatus: [complaintStep('menunggu_validasi_rt', 'wargaA', 'Riwayat palsu')],
+  }));
+});
+
 test('RT tidak dapat melewati validasi RW atau Kawil', async () => {
   const db = env.authenticatedContext('rt').firestore();
   await assertFails(updateDoc(doc(db, root, 'pengaduan', 'aduan-warga-a'), { status: 'menunggu_validasi_kawil' }));
@@ -206,8 +271,8 @@ test('hanya Kawil yang dapat menandai selesai dan catatan wajib diisi', async ()
   await assertFails(updateDoc(doc(db, root, 'pengaduan', 'aduan-warga-a'), {
     status: 'selesai', catatanPenyelesaian: '', diselesaikanOlehUid: 'kawil',
   }));
-  await assertSucceeds(updateDoc(doc(db, root, 'pengaduan', 'aduan-warga-a'), {
-    status: 'selesai', catatanPenyelesaian: 'Sudah diperbaiki', diselesaikanOlehUid: 'kawil',
+  await assertSucceeds(updateComplaint(db, 'aduan-warga-a', 'kawil', 'selesai', {
+    catatanPenyelesaian: 'Sudah diperbaiki', diselesaikanOlehUid: 'kawil',
   }));
 });
 
