@@ -145,13 +145,16 @@ test('petugas wilayah dapat membaca surat di wilayahnya dan tidak dapat membaca 
   await assertFails(getDoc(doc(db, root, 'pelayanan_surat', 'surat-warga-lain')));
 });
 
-test('warga dapat membuat pengaduan atas nama sendiri dan wilayahnya', async () => {
+test('warga dapat membuat pengaduan atas nama sendiri dan wilayahnya dengan status awal validasi RT', async () => {
   const db = env.authenticatedContext('wargaA').firestore();
   await assertSucceeds(setDoc(doc(db, root, 'pengaduan', 'aduan-baru'), {
     ...scoped('wargaA'),
     judul: 'Jalan rusak',
     uraian: 'Jalan lingkungan berlubang',
-    status: 'baru',
+    status: 'menunggu_validasi_rt',
+  }));
+  await assertFails(setDoc(doc(db, root, 'pengaduan', 'aduan-status-lama'), {
+    ...scoped('wargaA'), judul: 'Jalan rusak', uraian: 'Uraian', status: 'baru',
   }));
 });
 
@@ -168,14 +171,43 @@ test('warga tidak dapat membuat pengaduan atas nama orang lain atau membaca peng
   await assertFails(getDoc(doc(db, root, 'pengaduan', 'aduan-warga-lain')));
 });
 
-test('petugas wilayah dapat memperbarui status pengaduan dengan field yang diizinkan', async () => {
-  const db = env.authenticatedContext('rt').firestore();
-  await assertSucceeds(updateDoc(doc(db, root, 'pengaduan', 'aduan-warga-a'), {
-    status: 'ditindaklanjuti',
-    tanggapan: 'Akan diperiksa',
+test('validasi pengaduan wajib berjenjang RT lalu RW lalu Kawil', async () => {
+  const rtDb = env.authenticatedContext('rt').firestore();
+  const rwDb = env.authenticatedContext('rw').firestore();
+  const kawilDb = env.authenticatedContext('kawil').firestore();
+  const ref = doc(rtDb, root, 'pengaduan', 'aduan-warga-a');
+  await assertSucceeds(updateDoc(ref, { status: 'menunggu_validasi_rw', tanggapan: 'Diperiksa RT' }));
+  await assertFails(updateDoc(doc(kawilDb, root, 'pengaduan', 'aduan-warga-a'), { status: 'terverifikasi' }));
+  await assertSucceeds(updateDoc(doc(rwDb, root, 'pengaduan', 'aduan-warga-a'), { status: 'menunggu_validasi_kawil', tanggapan: 'Diperiksa RW' }));
+  await assertSucceeds(updateDoc(doc(kawilDb, root, 'pengaduan', 'aduan-warga-a'), { status: 'terverifikasi', tanggapan: 'Validasi akhir Kawil' }));
+  await assertSucceeds(updateDoc(doc(kawilDb, root, 'pengaduan', 'aduan-warga-a'), { status: 'ditindaklanjuti', tanggapan: 'Mulai ditangani' }));
+  await assertFails(updateDoc(doc(kawilDb, root, 'pengaduan', 'aduan-warga-a'), { status: 'selesai' }));
+  await assertSucceeds(updateDoc(doc(kawilDb, root, 'pengaduan', 'aduan-warga-a'), {
+    status: 'selesai', catatanPenyelesaian: 'Lampu jalan sudah diperbaiki',
+    diselesaikanOlehUid: 'kawil', diselesaikanOlehNama: 'Petugas Kawil',
   }));
+  await assertFails(updateDoc(ref, { pemohonUid: 'rt' }));
+});
+test('RT tidak dapat melewati validasi RW atau Kawil', async () => {
+  const db = env.authenticatedContext('rt').firestore();
+  await assertFails(updateDoc(doc(db, root, 'pengaduan', 'aduan-warga-a'), { status: 'menunggu_validasi_kawil' }));
+  await assertFails(updateDoc(doc(db, root, 'pengaduan', 'aduan-warga-a'), { status: 'ditindaklanjuti' }));
+});
+test('Ketua RW tidak dapat memvalidasi sebelum RT', async () => {
+  const db = env.authenticatedContext('rw').firestore();
+  await assertFails(updateDoc(doc(db, root, 'pengaduan', 'aduan-warga-a'), { status: 'menunggu_validasi_kawil' }));
+});
+test('hanya Kawil yang dapat menandai selesai dan catatan wajib diisi', async () => {
+  const db = env.authenticatedContext('kawil').firestore();
+  await env.withSecurityRulesDisabled(async context => {
+    await updateDoc(doc(context.firestore(), root, 'pengaduan', 'aduan-warga-a'), { status: 'ditindaklanjuti' });
+  });
+  await assertFails(updateDoc(doc(db, root, 'pengaduan', 'aduan-warga-a'), { status: 'selesai' }));
   await assertFails(updateDoc(doc(db, root, 'pengaduan', 'aduan-warga-a'), {
-    pemohonUid: 'rt',
+    status: 'selesai', catatanPenyelesaian: '', diselesaikanOlehUid: 'kawil',
+  }));
+  await assertSucceeds(updateDoc(doc(db, root, 'pengaduan', 'aduan-warga-a'), {
+    status: 'selesai', catatanPenyelesaian: 'Sudah diperbaiki', diselesaikanOlehUid: 'kawil',
   }));
 });
 
