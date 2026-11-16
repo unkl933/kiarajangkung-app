@@ -51,21 +51,34 @@ async function sendScheduleMessage(data, title, body) {
 // Statistik publik tanpa membuka seluruh dokumen Sensus kepada warga.
 async function rebuildPopulationStats(kampungId) {
   const snap = await db.collection('kampung').doc(kampungId).collection('sensus').get();
-  let lakiLaki = 0;
-  let perempuan = 0;
+  let total = 0;
+  let male = 0;
+  let female = 0;
   const kk = new Set();
+
   for (const doc of snap.docs) {
     const d = doc.data();
-    const gender = String(d.jenisKelamin || '').toLowerCase();
-    if (gender.includes('laki') || gender === 'l') lakiLaki++;
-    if (gender.includes('perempuan') || gender === 'p') perempuan++;
+    const status = String(d.statusWarga || 'Aktif').trim().toLowerCase();
+    if (['arsip', 'nonaktif', 'pindah', 'meninggal'].includes(status)) continue;
+
+    total++;
+    const gender = String(d.jenisKelamin || '').trim().toLowerCase();
+    if (['laki-laki', 'laki laki', 'l', 'pria'].includes(gender)) male++;
+    if (['perempuan', 'wanita', 'p'].includes(gender)) female++;
+
     const noKK = String(d.noKK || '').trim();
     if (noKK) kk.add(noKK);
   }
-  await db.collection('kampung').doc(kampungId).collection('statistik').doc('penduduk').set({
-    totalPenduduk: snap.size, lakiLaki, perempuan, totalKK: kk.size,
-    diperbaruiPada: admin.firestore.FieldValue.serverTimestamp()
-  }, { merge: true });
+
+  // Gunakan dokumen ringkasan yang memang dibaca Dashboard warga.
+  await db.collection('kampung').doc(kampungId)
+    .collection('statistik_penduduk').doc('ringkasan').set({
+      total,
+      male,
+      female,
+      kk: kk.size,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
 }
 exports.updatePopulationStats = onDocumentWritten('kampung/{kampungId}/sensus/{residentId}', async event => {
   await rebuildPopulationStats(event.params.kampungId);
