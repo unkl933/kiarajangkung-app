@@ -420,6 +420,10 @@ function s2CanUpdateComplaint() {
     'status', 'tanggapan', 'catatanPetugas', 'updatedAt', 'riwayatStatus',
     'catatanPenyelesaian', 'diselesaikanOlehUid', 'diselesaikanOlehNama', 'diselesaikanPada'
   ]);
+  let wargaFieldsOnly = changed.hasOnly([
+    'judul', 'kategori', 'prioritas', 'uraian', 'lokasi', 'catatanPemohon',
+    'status', 'updatedAt', 'riwayatStatus'
+  ]);
   let rtAdvance = s2HasRole('ketua_rt') &&
     resource.data.get('rtId', '') == s2Profile().get('rtId', '') &&
     currentStatus == 'menunggu_validasi_rt' && nextStatus == 'menunggu_validasi_rw';
@@ -447,11 +451,12 @@ function s2CanUpdateComplaint() {
      (currentStatus == 'perlu_perbaikan_kawil' && nextStatus == 'menunggu_validasi_kawil')) &&
     s2OwnScopedCreate();
   let adminUpdate = s2Admin() &&
-    (nextStatus != 'ditolak' && !nextStatus.startsWith('perlu_perbaikan_') || s2ComplaintHasReason());
+    (!(nextStatus in ['ditolak', 'perlu_perbaikan_rt', 'perlu_perbaikan_rw', 'perlu_perbaikan_kawil']) ||
+      s2ComplaintHasReason());
   return s2SignedIn() && allowedFields && s2ComplaintHistoryAppended() && (
     (s2InArea(resource.data) && (rtAdvance || rwAdvance || kawilAdvance ||
       rtReturn || rwReturn || kawilReturn)) ||
-    wargaResubmit || adminUpdate
+    (wargaResubmit && wargaFieldsOnly) || adminUpdate
   );
 }
 
