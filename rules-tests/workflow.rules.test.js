@@ -63,7 +63,7 @@ async function seed() {
       ...scoped('wargaA'),
       judul: 'Lampu jalan mati',
       uraian: 'Lampu jalan dekat balai mati',
-      status: 'baru',
+      status: 'menunggu_validasi_rt',
     });
     await setDoc(doc(db, root, 'laporan_rt_bulanan', 'laporan-rt-1'), {
       kawilId: 'kw-1',
