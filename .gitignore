@@ -79,4 +79,6 @@ key.properties
 # File hasil build dan konfigurasi lokal
 .dart_tool/
 build/
+
 **/local.properties
+rules-tests/node_modules/
