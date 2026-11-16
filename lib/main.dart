@@ -1446,7 +1446,7 @@ class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
           icon: const Icon(Icons.edit_outlined), label: const Text('Kelola Kontak Darurat')),
       ],
       const SizedBox(height: 10),
-      const Text('Laporan SOS dan antrean notifikasi disimpan di Firestore. Push notification ke HP petugas masih memerlukan Cloud Function dan aturan akses yang sesuai.',
+      const Text('Laporan SOS disimpan di Firestore dan notifikasi push dikirim kepada pengurus yang memiliki role sesuai. Tombol 112 tetap melakukan panggilan telepon langsung.',
         style: TextStyle(fontSize: 11, color: Colors.black54)),
     ]),
   );
@@ -1931,57 +1931,90 @@ Widget _populationNumber(String label, int count, IconData icon) => Row(children
 
 class DashboardAnnouncements extends StatelessWidget {
   const DashboardAnnouncements({super.key});
+
+  bool _isPublished(Map<String, dynamic> data, {required bool agenda}) {
+    final status = (data['status'] ?? (agenda ? 'draf' : 'aktif')).toString().toLowerCase();
+    return agenda
+        ? status == 'terbit' || status == 'aktif' || data['dipublikasikan'] == true
+        : status != 'nonaktif' && status != 'arsip' && status != 'draf';
+  }
+
   @override
-  Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
+  Widget build(BuildContext context) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
     stream: Db.module('pengumuman').snapshots(),
-    builder: (context, snapshot) {
-      if (!snapshot.hasData) return const SizedBox.shrink();
-      final items = snapshot.data!.docs.map((d) => d.data()).where((d) {
-        final status = (d['status'] ?? 'aktif').toString().toLowerCase();
-        return status != 'nonaktif' && status != 'arsip';
-      }).toList();
-      if (items.isEmpty) return const SizedBox.shrink();
-      final message = items.map((d) {
-        final title = (d['judul'] ?? d['nama'] ?? 'Pengumuman').toString();
-        final detail = (d['deskripsi'] ?? d['keterangan'] ?? '').toString();
-        return detail.trim().isEmpty ? title : '$title: $detail';
-      }).join('     •     ');
-      return Material(
-        color: Colors.white,
-        elevation: 5,
-        shadowColor: const Color(0x33C94B4B),
-        borderRadius: BorderRadius.circular(24),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(24),
-          onTap: () => showModalBottomSheet<void>(
-            context: context, isScrollControlled: true, showDragHandle: true,
-            builder: (ctx) => SafeArea(child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: SingleChildScrollView(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: items.map((d) => ListTile(
-                  title: Text((d['judul'] ?? d['nama'] ?? 'Pengumuman').toString()),
-                  subtitle: Text((d['deskripsi'] ?? d['keterangan'] ?? '').toString()),
-                )).toList(),
-              )),
-            )),
-          ),
-          child: Container(
-            height: 66,
-            padding: const EdgeInsets.symmetric(horizontal: 13),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), border: Border.all(color: const Color(0xFFF1DADB))),
-            child: Row(children: [
-              Container(width: 38, height: 38, decoration: const BoxDecoration(color: Color(0xFFB83E48), shape: BoxShape.circle), child: const Icon(Icons.campaign_rounded, color: Colors.white)),
-              const SizedBox(width: 11),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-                const Text('PENGUMUMAN KAMPUNG', style: TextStyle(color: Color(0xFFB83E48), fontWeight: FontWeight.w800, fontSize: 9, letterSpacing: .5)),
-                const SizedBox(height: 4),
-                Expanded(child: Align(alignment: Alignment.centerLeft, child: _MarqueeText(text: message))),
-              ])),
-              const SizedBox(width: 5), const Icon(Icons.chevron_right, color: Colors.black45),
-            ]),
-          ),
-        ),
+    builder: (context, announcementSnap) {
+      if (announcementSnap.hasError) return const SizedBox.shrink();
+      if (!announcementSnap.hasData) return const SizedBox.shrink();
+      final announcements = announcementSnap.data!.docs
+          .map((d) => <String, dynamic>{...d.data(), '_jenis': 'Pengumuman'})
+          .where((d) => _isPublished(d, agenda: false)).toList();
+      return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: Db.module('kegiatan_rt').snapshots(),
+        builder: (context, agendaSnap) {
+          final agenda = agendaSnap.data?.docs
+              .map((d) => <String, dynamic>{...d.data(), '_jenis': 'Agenda'})
+              .where((d) => _isPublished(d, agenda: true)).toList() ?? <Map<String, dynamic>>[];
+          final items = <Map<String, dynamic>>[...announcements, ...agenda];
+          if (items.isEmpty) return const SizedBox.shrink();
+          items.sort((a, b) => (b['createdAt'] is Timestamp ? (b['createdAt'] as Timestamp).millisecondsSinceEpoch : 0)
+              .compareTo(a['createdAt'] is Timestamp ? (a['createdAt'] as Timestamp).millisecondsSinceEpoch : 0));
+          final message = items.map((d) {
+            final title = (d['judul'] ?? d['nama'] ?? d['title'] ?? d['_jenis']).toString();
+            final detail = (d['deskripsi'] ?? d['keterangan'] ?? d['pesan'] ?? '').toString();
+            return detail.trim().isEmpty ? title : '$title: $detail';
+          }).join('     •     ');
+          return Material(
+            color: Colors.white,
+            elevation: 5,
+            shadowColor: const Color(0x33C94B4B),
+            borderRadius: BorderRadius.circular(24),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(24),
+              onTap: () => showModalBottomSheet<void>(
+                context: context, isScrollControlled: true, showDragHandle: true,
+                builder: (ctx) => SafeArea(child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: SingleChildScrollView(child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Pengumuman & Agenda Kampung', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 10),
+                      ...items.map((d) {
+                        final title = (d['judul'] ?? d['nama'] ?? d['title'] ?? d['_jenis']).toString();
+                        final detail = (d['deskripsi'] ?? d['keterangan'] ?? d['pesan'] ?? '').toString();
+                        final date = (d['tanggal'] ?? '').toString();
+                        final time = (d['waktu'] ?? '').toString();
+                        final location = (d['lokasi'] ?? '').toString();
+                        final meta = [date, time, location].where((v) => v.trim().isNotEmpty).join(' • ');
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(d['_jenis'] == 'Agenda' ? Icons.event_note_outlined : Icons.campaign_outlined),
+                          title: Text(title),
+                          subtitle: Text([if (meta.isNotEmpty) meta, if (detail.isNotEmpty) detail].join('\n')),
+                        );
+                      }),
+                    ],
+                  )),
+                )),
+              ),
+              child: Container(
+                height: 66,
+                padding: const EdgeInsets.symmetric(horizontal: 13),
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), border: Border.all(color: const Color(0xFFF1DADB))),
+                child: Row(children: [
+                  Container(width: 38, height: 38, decoration: const BoxDecoration(color: Color(0xFFB83E48), shape: BoxShape.circle), child: const Icon(Icons.campaign_rounded, color: Colors.white)),
+                  const SizedBox(width: 11),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+                    const Text('PENGUMUMAN & AGENDA', style: TextStyle(color: Color(0xFFB83E48), fontWeight: FontWeight.w800, fontSize: 9, letterSpacing: .5)),
+                    const SizedBox(height: 4),
+                    Expanded(child: Align(alignment: Alignment.centerLeft, child: _MarqueeText(text: message))),
+                  ])),
+                  const SizedBox(width: 5), const Icon(Icons.chevron_right, color: Colors.black45),
+                ]),
+              ),
+            ),
+          );
+        },
       );
     },
   );
@@ -2133,7 +2166,7 @@ class ModulesPage extends StatelessWidget {
             final staff = isAdmin || roles.any((r) => ['perangkat_kawil','ketua_rw','ketua_rt'].contains(r));
             if (m.keyName == 'koordinasi_wilayah') return true;
             if (m.keyName == 'panel_kawil') return roles.contains('perangkat_kawil');
-            if (m.keyName == 'kontak_darurat') return isAdmin;
+            if (m.keyName == 'kontak_darurat') return false;
             return isAdmin || !['arsip_warga', 'migrasi_satu_data'].contains(m.keyName);
           }).map((m) => Card(
                 child: ListTile(
