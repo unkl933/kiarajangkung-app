@@ -21,7 +21,9 @@ const profiles = {
   wargaB: { role: 'warga', kawilId: 'kw-1', rwId: 'rw-1', rtId: 'rt-1' },
   wargaLain: { role: 'warga', kawilId: 'kw-2', rwId: 'rw-2', rtId: 'rt-2' },
   rt: { role: 'ketua_rt', kawilId: 'kw-1', rwId: 'rw-1', rtId: 'rt-1' },
+  rtWrong: { role: 'ketua_rt', kawilId: 'kw-1', rwId: 'rw-1', rtId: 'rt-99' },
   rw: { role: 'ketua_rw', kawilId: 'kw-1', rwId: 'rw-1', rtId: 'rt-1' },
+  rwWrong: { role: 'ketua_rw', kawilId: 'kw-1', rwId: 'rw-99', rtId: '' },
   kawil: { role: 'perangkat_kawil', kawilId: 'kw-1', rwId: '', rtId: '' },
   admin: { role: 'admin', kawilId: '', rwId: '', rtId: '' },
   owner: { role: 'owner', kawilId: '', rwId: '', rtId: '' },
@@ -196,6 +198,33 @@ test('validasi pengaduan wajib berjenjang RT lalu RW lalu Kawil', async () => {
   }));
   await assertFails(updateDoc(ref, { pemohonUid: 'rt' }));
 });
+test('penolakan pengaduan wajib menyertakan alasan', async () => {
+  const db = env.authenticatedContext('rt').firestore();
+  const ref = doc(db, root, 'pengaduan', 'aduan-warga-a');
+  await assertFails(updateDoc(ref, {
+    status: 'ditolak', catatanPetugas: '',
+    riwayatStatus: arrayUnion(complaintStep('ditolak', 'rt')),
+  }));
+  await assertSucceeds(updateDoc(ref, {
+    status: 'ditolak', catatanPetugas: 'Laporan berada di luar kewenangan pelayanan kampung',
+    riwayatStatus: arrayUnion(complaintStep('ditolak', 'rt', 'Laporan berada di luar kewenangan pelayanan kampung')),
+  }));
+});
+
+test('petugas RT dan RW tidak dapat memproses pengaduan di luar wilayah tugasnya', async () => {
+  const rtDb = env.authenticatedContext('rtWrong').firestore();
+  const rwDb = env.authenticatedContext('rwWrong').firestore();
+  const id = 'aduan-warga-a';
+  await assertFails(updateDoc(doc(rtDb, root, 'pengaduan', id), {
+    status: 'perlu_perbaikan_rt', catatanPetugas: 'Perbaiki',
+    riwayatStatus: arrayUnion(complaintStep('perlu_perbaikan_rt', 'rtWrong')),
+  }));
+  await assertFails(updateDoc(doc(rwDb, root, 'pengaduan', id), {
+    status: 'perlu_perbaikan_rw', catatanPetugas: 'Perbaiki',
+    riwayatStatus: arrayUnion(complaintStep('perlu_perbaikan_rw', 'rwWrong')),
+  }));
+});
+
 test('RT dapat meminta perbaikan dengan alasan wajib dan warga mengirim ulang ke tahap RT', async () => {
   const rtDb = env.authenticatedContext('rt').firestore();
   const wargaDb = env.authenticatedContext('wargaA').firestore();
@@ -210,6 +239,10 @@ test('RT dapat meminta perbaikan dengan alasan wajib dan warga mengirim ulang ke
     catatanPetugas: 'Mohon lengkapi lokasi kejadian',
     tanggapan: 'Mohon lengkapi lokasi kejadian',
     riwayatStatus: arrayUnion(complaintStep('perlu_perbaikan_rt', 'rt', 'Mohon lengkapi lokasi kejadian')),
+  }));
+  await assertFails(updateDoc(doc(wargaDb, root, 'pengaduan', 'aduan-warga-a'), {
+    status: 'menunggu_validasi_rt', catatanPetugas: 'Catatan petugas dipalsukan',
+    riwayatStatus: arrayUnion(complaintStep('menunggu_validasi_rt', 'wargaA')),
   }));
   await assertSucceeds(updateDoc(doc(wargaDb, root, 'pengaduan', 'aduan-warga-a'), {
     uraian: 'Lampu jalan di dekat balai kampung mati',
