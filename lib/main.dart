@@ -2981,7 +2981,7 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
           'pemohonUid': _uid, 'pemohonNama': _name(), 'wargaId': (_profile['wargaId'] ?? '').toString(),
           ..._areaPayload(), 'status': 'menunggu_validasi_rt', 'tanggapan': '',
           'riwayatStatus': [{
-            'status': 'menunggu_validasi_rt', 'olehUid': _uid, 'olehNama': _name(),
+            'status': 'menunggu_validasi_rt', 'olehUid': _uid, 'olehNama': _name(), 'olehRole': 'warga',
             'waktu': Timestamp.now(), 'catatan': 'Pengaduan dikirim dan menunggu pemeriksaan Ketua RT.',
           }],
           'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
@@ -3162,6 +3162,7 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
           'updatedAt': FieldValue.serverTimestamp(),
           'riwayatStatus': FieldValue.arrayUnion([{
             'status': status, 'olehUid': _uid, 'olehNama': _name(),
+            'olehRole': _roles.where((role) => role != 'warga').join(','),
             'waktu': Timestamp.now(), 'catatan': message,
           }]),
         };
@@ -3222,7 +3223,7 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
           'uraian': description.text.trim(), 'lokasi': location.text.trim(),
           'status': targetStatus, 'updatedAt': FieldValue.serverTimestamp(),
           'riwayatStatus': FieldValue.arrayUnion([{
-            'status': targetStatus, 'olehUid': _uid, 'olehNama': _name(),
+            'status': targetStatus, 'olehUid': _uid, 'olehNama': _name(), 'olehRole': 'warga',
             'waktu': Timestamp.now(), 'catatan': 'Warga memperbaiki pengaduan dan mengirim ulang.',
           }]),
         });
