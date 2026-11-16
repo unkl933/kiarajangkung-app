@@ -162,6 +162,10 @@ test('warga dapat membuat pengaduan atas nama sendiri dan wilayahnya dengan stat
     judul: 'Jalan rusak',
     uraian: 'Jalan lingkungan berlubang',
     status: 'menunggu_validasi_rt',
+    riwayatStatus: [complaintStep('menunggu_validasi_rt', 'wargaA', 'Pengaduan dibuat')],
+  }));
+  await assertFails(setDoc(doc(db, root, 'pengaduan', 'aduan-tanpa-riwayat'), {
+    ...scoped('wargaA'), judul: 'Jalan rusak', uraian: 'Uraian', status: 'menunggu_validasi_rt',
   }));
   await assertFails(setDoc(doc(db, root, 'pengaduan', 'aduan-status-lama'), {
     ...scoped('wargaA'), judul: 'Jalan rusak', uraian: 'Uraian', status: 'baru',
