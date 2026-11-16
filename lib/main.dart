@@ -1861,7 +1861,10 @@ class RondaReportsPage extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Laporan Ronda')),
     body: StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
-      stream: Db.module('ronda_absensi').orderBy('tanggal', descending: true).limit(150).snapshots(),
+      stream: (isAdmin
+        ? Db.module('ronda_absensi')
+        : Db.module('ronda_absensi').where('uid', isEqualTo: Db.auth.currentUser?.uid ?? ''))
+        .orderBy('tanggal', descending: true).limit(150).snapshots(),
       builder: (context, snap) {
         if (snap.hasError) return Center(child: Text('Gagal memuat laporan: ${snap.error}'));
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
@@ -2038,7 +2041,7 @@ class DashboardAnnouncements extends StatelessWidget {
           .map((d) => <String, dynamic>{...d.data(), '_jenis': 'Pengumuman'})
           .where((d) => _isPublished(d, agenda: false)).toList();
       return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: Db.module('kegiatan_rt').snapshots(),
+        stream: Db.module('kegiatan_rt').where('status', whereIn: ['terbit', 'aktif']).snapshots(),
         builder: (context, agendaSnap) {
           final agenda = agendaSnap.data?.docs
               .map((d) => <String, dynamic>{...d.data(), '_jenis': 'Agenda'})
@@ -4118,7 +4121,9 @@ class InformasiKampungPage extends StatelessWidget {
   }
 
   Widget _list(String collection, bool agenda) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-    stream: Db.module(collection).snapshots(),
+    stream: (agenda && !isAdmin
+        ? Db.module(collection).where('status', whereIn: ['terbit', 'aktif'])
+        : Db.module(collection)).snapshots(),
     builder: (context, snap) {
       if (snap.hasError) return Center(child: Text('Gagal memuat data: ${snap.error}'));
       if (!snap.hasData) return const Center(child: CircularProgressIndicator());
