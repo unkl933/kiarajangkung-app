@@ -82,7 +82,7 @@ after(async () => {
 test('Kawil dapat membuat instruksi untuk RW di wilayahnya', async () => {
   const db = env.authenticatedContext('kawil').firestore();
   await assertSucceeds(setDoc(ref(db, 'koordinasi_instruksi', 'instruksi-baru'), {
-    ...scoped('kawil', { targetLevel: 'rw', targetId: 'rw-1' }),
+    ...scoped('kawil', { targetLevel: 'rw', targetId: 'rw-1', rwId: 'rw-1' }),
     judul: 'Arahan kegiatan',
   }));
 });
@@ -98,7 +98,7 @@ test('Kawil tidak dapat membuat instruksi untuk RW di luar wilayahnya', async ()
 test('Ketua RW dapat membuat tugas untuk RT di RW sendiri', async () => {
   const db = env.authenticatedContext('rw').firestore();
   await assertSucceeds(setDoc(ref(db, 'koordinasi_tugas', 'tugas-baru'), {
-    ...scoped('rw', { targetLevel: 'rt', targetId: 'rt-1' }),
+    ...scoped('rw', { targetLevel: 'rt', targetId: 'rt-1', rtId: 'rt-1' }),
     judul: 'Pendataan',
   }));
 });
