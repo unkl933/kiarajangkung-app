@@ -1785,7 +1785,7 @@ class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
         pushError = e.toString();
       }
       if (mounted) showMessage(context, pushError.isNotEmpty
-        ? 'SOS tersimpan, tetapi notifikasi push petugas gagal dikirim. Periksa koneksi/API.'
+        ? 'SOS tersimpan, tetapi push gagal: $pushError'
         : pos == null
           ? 'SOS tercatat dan notifikasi petugas diproses. GPS belum tersedia; petugas perlu menghubungi pelapor.'
           : 'SOS berhasil dikirim beserta lokasi GPS dan notifikasi petugas.');
