@@ -6849,6 +6849,9 @@ class UserManagementPage extends StatelessWidget {
                 : <String>{(meData['role'] ?? '').toString().toLowerCase()};
             final isOwner = meRoles.contains('owner') ||
                 (meData['role'] ?? '').toString().toLowerCase() == 'owner';
+            final isAdmin = meRoles.contains('admin') ||
+                (meData['role'] ?? '').toString().toLowerCase() == 'admin';
+            final canResetResidentAccount = isOwner || isAdmin;
             return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: Db.firestore.collection('users').orderBy('nama').snapshots(),
               builder: (context, snapshot) {
@@ -6857,7 +6860,7 @@ class UserManagementPage extends StatelessWidget {
                 return ListView(
                   padding: const EdgeInsets.all(12),
                   children: [
-                    if (isOwner)
+                    if (canResetResidentAccount)
                       Card(
                         child: ListTile(
                           leading: const Icon(Icons.lock_reset),
