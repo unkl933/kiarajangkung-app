@@ -435,94 +435,135 @@ match /kampung/kiarajangkung/laporan_sos/{sosId} {
 }
 
 
+    // Hanya koleksi yang memang dipakai sebagai direktori/informasi umum
+    // yang boleh dibaca oleh seluruh pengguna terautentikasi.
+    function isKnownPublicModule(module) {
+      return module in [
+        'profil_kampung','pengumuman','galeri','perangkat','ronda',
+        'kontak_darurat','umkm','sarana','wisata','kesenian',
+        'kebersihan','fasilitas_kesehatan','organisasi','statistik_penduduk'
+      ];
+    }
+    // Koleksi yang dikelola Admin/Owner melalui modul data umum.
+    // Koleksi dengan aturan khusus (Sensus, layanan, SOS, koordinasi, dll.)
+    // tidak dimasukkan ke daftar ini.
+    function isKnownAdminManagedModule(module) {
+      return module in [
+        'profil_kampung','pengumuman','galeri','perangkat','ronda',
+        'kontak_darurat','umkm','sarana','wisata','kesenian',
+        'kebersihan','fasilitas_kesehatan','organisasi','statistik_penduduk',
+        'wilayah_kawil','wilayah_rw','wilayah_rt','ronda_absensi'
+      ];
+    }
+
     match /kampung/{kampungId}/{module}/{docId} {
-      // Sensus bersifat pribadi: Owner/Admin dapat membaca seluruh data;
-      // warga hanya dapat membaca dokumen sensus miliknya sendiri.
-      allow read: if module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan']
-        ? false
-        : module in ['wilayah_kawil', 'wilayah_rw', 'wilayah_rt']
-          ? (isOwnerOrAdmin() ||
-             (module == 'wilayah_rw' && s3HasRole('perangkat_kawil') && resource.data.get('kawilId', '') == s3Profile().get('kawilId', '')) ||
-             (module == 'wilayah_rt' && ((s3HasRole('ketua_rw') && resource.data.get('rwId', '') == s3Profile().get('rwId', '')) ||
-               (s3HasRole('perangkat_kawil') && resource.data.get('kawilId', '') == s3Profile().get('kawilId', '')))))
-          : module == 'sensus'
-            ? (isOwnerOrAdmin() || ownsSensus(docId))
-            : module == 'ronda_absensi'
-              ? canReadRondaAttendance(resource.data)
-              : (module in ['riwayat_perubahan', 'sensus_nik_index'] ? isOwnerOrAdmin() : signedIn());
+      // Tolak path kampung lain dan modul yang tidak dikenal.
+      // Firestore Rules bukan filter: query warga tetap harus membatasi
+      // hasil ke dokumen yang memenuhi aturan akses.
+      allow read: if kampungId == 'kiarajangkung' && (
+        module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan']
+          ? false
+          : module in ['wilayah_kawil', 'wilayah_rw', 'wilayah_rt']
+            ? (isOwnerOrAdmin() ||
+               (module == 'wilayah_rw' && s3HasRole('perangkat_kawil') && resource.data.get('kawilId', '') == s3Profile().get('kawilId', '')) ||
+               (module == 'wilayah_rt' && ((s3HasRole('ketua_rw') && resource.data.get('rwId', '') == s3Profile().get('rwId', '')) ||
+                 (s3HasRole('perangkat_kawil') && resource.data.get('kawilId', '') == s3Profile().get('kawilId', '')))))
+            : module == 'sensus'
+              ? (isOwnerOrAdmin() || ownsSensus(docId))
+              : module == 'ronda_absensi'
+                ? canReadRondaAttendance(resource.data)
+                : (module in ['riwayat_perubahan', 'sensus_nik_index']
+                    ? isOwnerOrAdmin()
+                    : (isKnownPublicModule(module) && signedIn()))
+      );
 
-      allow create: if module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan']
-        ? false
-        : module == 'riwayat_perubahan'
-          ? (isOwnerOrAdmin() || (hasUserProfile() && request.resource.data.get('uid', '') == request.auth.uid && request.resource.data.get('wargaId', '') == userData().get('wargaId', '')))
-          : module == 'sensus'
-            ? (isOwnerOrAdmin() && hasMatchingSensusNikIndex(docId) &&
-               (isOwner() || (request.resource.data.get('role', 'warga') == 'warga' && request.resource.data.get('roles', ['warga']).hasOnly(['warga']))))
-            : (module != 'sensus_nik_index' && (isOwnerOrAdmin() || (
-              module == 'ronda_absensi' && selfRondaRecord() &&
-              request.resource.data.get('tanggal','') is string &&
-              request.resource.data.get('nama','') is string &&
-              request.resource.data.keys().hasOnly([
-                'uid','wargaId','nama','tanggal','hari','scheduleId',
-                'statusKesediaan','alasan','diperbaruiPada',
-                'waktuHadir','waktuHadirText','status','updatedAt'
-              ]) && (
-                (request.resource.data.get('statusKesediaan','') in ['Bersedia','Berhalangan'] &&
-                 (request.resource.data.statusKesediaan != 'Berhalangan' || request.resource.data.get('alasan','').size() > 0)) ||
-                (request.resource.data.get('waktuHadir', null) == request.time && request.resource.data.get('status','') == 'Hadir')
+      allow create: if kampungId == 'kiarajangkung' && (
+        module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan']
+          ? false
+          : module == 'riwayat_perubahan'
+            ? (isOwnerOrAdmin() || (hasUserProfile() && request.resource.data.get('uid', '') == request.auth.uid && request.resource.data.get('wargaId', '') == userData().get('wargaId', '')))
+            : module == 'sensus'
+              ? (isOwnerOrAdmin() && hasMatchingSensusNikIndex(docId) &&
+                 (isOwner() || (request.resource.data.get('role', 'warga') == 'warga' && request.resource.data.get('roles', ['warga']).hasOnly(['warga']))))
+              : module == 'ronda_absensi'
+                ? (isOwnerOrAdmin() || (
+                    selfRondaRecord() &&
+                    request.resource.data.get('tanggal','') is string &&
+                    request.resource.data.get('nama','') is string &&
+                    request.resource.data.keys().hasOnly([
+                      'uid','wargaId','nama','tanggal','hari','scheduleId',
+                      'statusKesediaan','alasan','diperbaruiPada',
+                      'waktuHadir','waktuHadirText','status','updatedAt'
+                    ]) && (
+                      (request.resource.data.get('statusKesediaan','') in ['Bersedia','Berhalangan'] &&
+                       (request.resource.data.statusKesediaan != 'Berhalangan' || request.resource.data.get('alasan','').size() > 0)) ||
+                      (request.resource.data.get('waktuHadir', null) == request.time && request.resource.data.get('status','') == 'Hadir')
+                    )
+                  ))
+                : (isKnownAdminManagedModule(module) && isOwnerOrAdmin())
+      );
+
+      allow update: if kampungId == 'kiarajangkung' && (
+        module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan']
+          ? false
+          : module in ['riwayat_perubahan', 'sensus_nik_index']
+            ? false
+            : (isKnownAdminManagedModule(module) && isOwnerOrAdmin()) ||
+              (module == 'sensus' && isOwnerOrAdmin() && (
+                request.resource.data.get('nik','') == resource.data.get('nik','') &&
+                request.resource.data.get('wargaId','') == docId &&
+                hasMatchingSensusNikIndex(docId) &&
+                (isOwner() || (request.resource.data.get('role',null) == resource.data.get('role',null) && request.resource.data.get('roles',[]) == resource.data.get('roles',[])))
+              )) || (
+                module == 'sensus' && ownsSensus(docId) && !residentEditsLocked() &&
+                request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                  'jenisKelamin','tempatLahir','tanggalLahir','telepon','agama',
+                  'statusPerkawinan','pendidikan','pekerjaan','hubunganKeluarga',
+                  'alamat','golonganDarah','kewarganegaraan',
+                  'statusDalamKeluarga','kodePos','email','noHp','noTelp',
+                  'namaAyah','namaIbu','keterangan','updatedAt'
+                ]) &&
+                request.resource.data.get('nama','') == resource.data.get('nama','') &&
+                request.resource.data.get('nik','') == resource.data.get('nik','') &&
+                request.resource.data.get('noKK','') == resource.data.get('noKK','') &&
+                request.resource.data.get('role',null) == resource.data.get('role',null) &&
+                request.resource.data.get('roles',[]) == resource.data.get('roles',[]) &&
+                request.resource.data.get('wargaId','') == resource.data.get('wargaId','') &&
+                request.resource.data.get('accountUid','') == resource.data.get('accountUid','')
+              ) || (
+                module == 'ronda_absensi' && signedIn() &&
+                resource.data.get('uid','') == request.auth.uid &&
+                request.resource.data.get('uid','') == request.auth.uid &&
+                request.resource.data.get('scheduleId','') == resource.data.get('scheduleId','') &&
+                request.resource.data.get('tanggal','') == resource.data.get('tanggal','') &&
+                request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                  'statusKesediaan','alasan','diperbaruiPada','waktuHadir','waktuHadirText',
+                  'waktuPulang','waktuPulangText','status','updatedAt'
+                ]) && (
+                  (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['statusKesediaan','alasan','diperbaruiPada']) &&
+                   request.resource.data.get('statusKesediaan','') in ['Bersedia','Berhalangan'] &&
+                   (request.resource.data.statusKesediaan != 'Berhalangan' || request.resource.data.get('alasan','').size() > 0)) ||
+                  (resource.data.get('waktuHadir',null) == null && request.resource.data.get('waktuHadir',null) == request.time && request.resource.data.get('status','') == 'Hadir') ||
+                  (resource.data.get('waktuHadir',null) != null && resource.data.get('waktuPulang',null) == null && request.resource.data.get('waktuPulang',null) == request.time && request.resource.data.get('status','') == 'Selesai Ronda')
+                )
+              ) || (
+                module == 'organisasi' &&
+                signedIn() && resource.data.get('ketuaUid','') == request.auth.uid &&
+                request.resource.data.get('ketuaUid','') == resource.data.get('ketuaUid','') &&
+                request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                  'judul','nama','kategori','ketua','deskripsi','sejarah','tujuan','wakil','sekretaris','bendahara',
+                  'anggota','programKerja','alamat','telepon','lokasiMaps','periode','fotoUrl','updatedAt','updatedBy','agenda','kegiatan'
+                ])
               )
-            )));
+      );
 
-      allow update: if module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan'] ? false : (module == 'riwayat_perubahan' ? false : ((module != 'sensus_nik_index' && isOwnerOrAdmin() && (
-        module != 'sensus' || (
-          request.resource.data.get('nik','') == resource.data.get('nik','') &&
-          request.resource.data.get('wargaId','') == docId &&
-          hasMatchingSensusNikIndex(docId) &&
-          (isOwner() || (request.resource.data.get('role',null) == resource.data.get('role',null) && request.resource.data.get('roles',[]) == resource.data.get('roles',[])))
-        )
-      )) || (
-        module == 'sensus' && ownsSensus(docId) && !residentEditsLocked() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'jenisKelamin','tempatLahir','tanggalLahir','telepon','agama',
-          'statusPerkawinan','pendidikan','pekerjaan','hubunganKeluarga',
-          'alamat','golonganDarah','kewarganegaraan',
-          'statusDalamKeluarga','kodePos','email','noHp','noTelp',
-          'namaAyah','namaIbu','keterangan','updatedAt'
-        ]) &&
-        request.resource.data.get('nama','') == resource.data.get('nama','') &&
-        request.resource.data.get('nik','') == resource.data.get('nik','') &&
-        request.resource.data.get('noKK','') == resource.data.get('noKK','') &&
-        request.resource.data.get('role',null) == resource.data.get('role',null) &&
-        request.resource.data.get('roles',[]) == resource.data.get('roles',[]) &&
-        request.resource.data.get('wargaId','') == resource.data.get('wargaId','') &&
-        request.resource.data.get('accountUid','') == resource.data.get('accountUid','')
-      ) || (
-        module == 'ronda_absensi' && signedIn() &&
-        resource.data.get('uid','') == request.auth.uid &&
-        request.resource.data.get('uid','') == request.auth.uid &&
-        request.resource.data.get('scheduleId','') == resource.data.get('scheduleId','') &&
-        request.resource.data.get('tanggal','') == resource.data.get('tanggal','') &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'statusKesediaan','alasan','diperbaruiPada','waktuHadir','waktuHadirText',
-          'waktuPulang','waktuPulangText','status','updatedAt'
-        ]) && (
-          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['statusKesediaan','alasan','diperbaruiPada']) &&
-           request.resource.data.get('statusKesediaan','') in ['Bersedia','Berhalangan'] &&
-           (request.resource.data.statusKesediaan != 'Berhalangan' || request.resource.data.get('alasan','').size() > 0)) ||
-          (resource.data.get('waktuHadir',null) == null && request.resource.data.get('waktuHadir',null) == request.time && request.resource.data.get('status','') == 'Hadir') ||
-          (resource.data.get('waktuHadir',null) != null && resource.data.get('waktuPulang',null) == null && request.resource.data.get('waktuPulang',null) == request.time && request.resource.data.get('status','') == 'Selesai Ronda')
-        )
-      ) || (
-        module == 'organisasi' &&
-        signedIn() && resource.data.get('ketuaUid','') == request.auth.uid &&
-        request.resource.data.get('ketuaUid','') == resource.data.get('ketuaUid','') &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'judul','nama','kategori','ketua','deskripsi','sejarah','tujuan','wakil','sekretaris','bendahara',
-          'anggota','programKerja','alamat','telepon','lokasiMaps','periode','fotoUrl','updatedAt','updatedBy','agenda','kegiatan'
-        ])
-      )));
-
-      allow delete: if module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan'] ? false : (module in ['riwayat_perubahan', 'sensus', 'sensus_nik_index'] ? false : isOwnerOrAdmin());
+      allow delete: if kampungId == 'kiarajangkung' && (
+        module in ['pelayanan_surat', 'pengaduan', 'kegiatan_rt', 'laporan_rt_bulanan', 'notifikasi', 'laporan_sos', 'koordinasi_instruksi', 'koordinasi_tugas', 'koordinasi_progres', 'koordinasi_rapat', 'koordinasi_kehadiran', 'koordinasi_forum', 'koordinasi_pengumuman', 'koordinasi_konfirmasi', 'koordinasi_notulen', 'koordinasi_perubahan']
+          ? false
+          : (module in ['riwayat_perubahan', 'sensus', 'sensus_nik_index']
+              ? false
+              : (isKnownAdminManagedModule(module) && isOwnerOrAdmin()))
+      );
     }
 
     // Indeks NIK harus selalu menunjuk ke dokumen Sensus yang cocok.
