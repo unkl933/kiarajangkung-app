@@ -1666,6 +1666,27 @@ class EmergencyCenterPage extends StatefulWidget {
 class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
   bool _sending = false;
   String get _uid => Db.auth.currentUser?.uid ?? '';
+  bool get _canMonitorSos {
+    final roles = (widget.profile['roles'] is List)
+      ? (widget.profile['roles'] as List).map((e) => e.toString()).toSet()
+      : <String>{};
+    final role = (widget.profile['role'] ?? '').toString();
+    return widget.isAdmin || role == 'owner' || role == 'admin' ||
+      role == 'perangkat_kawil' || roles.contains('owner') ||
+      roles.contains('admin') || roles.contains('perangkat_kawil');
+  }
+  Query<Map<String, dynamic>> get _sosQuery {
+    final roles = (widget.profile['roles'] is List)
+      ? (widget.profile['roles'] as List).map((e) => e.toString()).toSet()
+      : <String>{};
+    final role = (widget.profile['role'] ?? '').toString();
+    final global = widget.isAdmin || role == 'owner' || role == 'admin' ||
+      roles.contains('owner') || roles.contains('admin');
+    final query = Db.module('laporan_sos');
+    return global
+      ? query.limit(50)
+      : query.where('kawilId', isEqualTo: widget.profile['kawilId'] ?? '').limit(50);
+  }
   String get _name => (widget.profile['nama'] ?? widget.profile['name'] ?? Db.auth.currentUser?.displayName ?? 'Warga').toString();
   Map<String, dynamic> get _area => {
     'kawil': widget.profile['kawil'] ?? '', 'kawilId': widget.profile['kawilId'] ?? '',
@@ -1778,6 +1799,96 @@ class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
         subtitle: const Text('Panggilan langsung melalui jaringan telepon'),
         trailing: const Icon(Icons.phone_in_talk, color: Color(0xFF218447)),
         onTap: () => _openPhone(context, '112'))),
+      if (_canMonitorSos) ...[
+        const SizedBox(height: 18),
+        const _DashboardSectionTitle(title: 'SOS Masuk • Perlu Respons'),
+        const SizedBox(height: 6),
+        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _sosQuery.snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.hasError) return Text('Laporan SOS gagal dimuat: ${snapshot.error}');
+            if (!snapshot.hasData) return const LinearProgressIndicator();
+            final docs = [...snapshot.data!.docs]
+              ..sort((a, b) {
+                final av = a.data()['createdAt'];
+                final bv = b.data()['createdAt'];
+                final at = av is Timestamp ? av : Timestamp(0, 0);
+                final bt = bv is Timestamp ? bv : Timestamp(0, 0);
+                return bt.compareTo(at);
+              });
+            if (docs.isEmpty) {
+              return const Card(child: ListTile(
+                leading: Icon(Icons.verified_user_outlined, color: Colors.green),
+                title: Text('Belum ada laporan SOS masuk'),
+                subtitle: Text('Laporan warga akan muncul otomatis di sini saat dikirim.'),
+              ));
+            }
+            return Column(children: docs.map((doc) {
+              final d = doc.data();
+              final status = (d['status'] ?? 'baru').toString();
+              final lat = d['latitude'];
+              final lon = d['longitude'];
+              final hasLocation = lat is num && lon is num;
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: Color(0xFFFFE5E5),
+                    child: Icon(Icons.sos, color: Color(0xFFC62828)),
+                  ),
+                  title: Text(
+                    '${(d['jenis'] ?? 'Darurat').toString()} • ${(d['pemohonNama'] ?? 'Warga').toString()}',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    '${(d['uraian'] ?? '').toString()}\nStatus: ${status.toUpperCase()} • ${(d['rt'] ?? '-')} / ${(d['rw'] ?? '-')}',
+                    maxLines: 4,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  isThreeLine: true,
+                  trailing: hasLocation
+                    ? IconButton(
+                        tooltip: 'Lihat lokasi SOS',
+                        icon: const Icon(Icons.location_on, color: Color(0xFFC62828)),
+                        onPressed: () => launchUrl(
+                          Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lon'),
+                          mode: LaunchMode.externalApplication,
+                        ),
+                      )
+                    : const Icon(Icons.chevron_right),
+                  onTap: () => showDialog<void>(
+                    context: context,
+                    builder: (dc) => AlertDialog(
+                      title: Text('SOS • ${(d['jenis'] ?? 'Darurat')}'),
+                      content: SingleChildScrollView(child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _DetailLine(label: 'Pelapor', value: (d['pemohonNama'] ?? '-').toString()),
+                          _DetailLine(label: 'Telepon', value: (d['pemohonTelepon'] ?? '-').toString()),
+                          _DetailLine(label: 'Wilayah', value: 'RT ${d['rt'] ?? '-'} / RW ${d['rw'] ?? '-'}'),
+                          _DetailLine(label: 'Keterangan', value: (d['uraian'] ?? '-').toString()),
+                          _DetailLine(label: 'Status', value: status),
+                        ],
+                      )),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(dc), child: const Text('Tutup')),
+                        if (hasLocation) FilledButton.icon(
+                          onPressed: () => launchUrl(
+                            Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lon'),
+                            mode: LaunchMode.externalApplication,
+                          ),
+                          icon: const Icon(Icons.map_outlined), label: const Text('Buka Lokasi'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList());
+          },
+        ),
+      ],
       const SizedBox(height: 18),
       const _DashboardSectionTitle(title: 'Bhabinkamtibmas • Babinsa • IGD / Ambulans'),
       const SizedBox(height: 5),
