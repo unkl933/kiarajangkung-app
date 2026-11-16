@@ -1492,6 +1492,8 @@ class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
         onTap: () => _openPhone(context, '112'))),
       const SizedBox(height: 18),
       const _DashboardSectionTitle(title: 'Bhabinkamtibmas • Babinsa • IGD / Ambulans'),
+      const SizedBox(height: 5),
+      const Text('Tidak punya pulsa? Gunakan tombol WhatsApp untuk menghubungi petugas melalui paket data internet.', style: TextStyle(fontSize: 12, color: Colors.black54)),
       const SizedBox(height: 8),
       StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: Db.module('kontak_darurat').snapshots(),
@@ -1509,8 +1511,20 @@ class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
               leading: CircleAvatar(child: Icon(_icon(d))),
               title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
               subtitle: Text([if (category.isNotEmpty) category, if (phone.isNotEmpty) phone, if (note.isNotEmpty) note].join(' • ')),
-              trailing: phone.isEmpty ? null : IconButton(icon: const Icon(Icons.call, color: Color(0xFF218447)),
-                onPressed: () => _openPhone(context, phone)),
+              trailing: phone.isEmpty ? null : Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(
+                  tooltip: 'Telepon biasa',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.call, color: Color(0xFF218447)),
+                  onPressed: () => _openPhone(context, phone),
+                ),
+                IconButton(
+                  tooltip: 'Hubungi lewat WhatsApp (paket data)',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.chat_rounded, color: Color(0xFF168B55)),
+                  onPressed: () => _openWhatsApp(context, phone),
+                ),
+              ]),
             ));
           }).toList());
         }),
@@ -1521,7 +1535,7 @@ class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
           icon: const Icon(Icons.edit_outlined), label: const Text('Kelola Kontak Darurat')),
       ],
       const SizedBox(height: 10),
-      const Text('Laporan SOS disimpan di Firestore dan notifikasi push dikirim kepada pengurus yang memiliki role sesuai. Tombol 112 tetap melakukan panggilan telepon langsung.',
+      const Text('WhatsApp menggunakan paket data dan hanya dapat menghubungi nomor petugas yang terdaftar. Tombol 112 tetap melakukan panggilan telepon biasa dan bukan panggilan WhatsApp.',
         style: TextStyle(fontSize: 11, color: Colors.black54)),
     ]),
   );
