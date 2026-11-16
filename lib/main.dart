@@ -19,6 +19,20 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:geolocator/geolocator.dart';
 
+String displayFirestoreValue(dynamic value) {
+  if (value is Timestamp) {
+    final date = value.toDate();
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final year = date.year.toString();
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
+    return '$day-$month-$year $hour:$minute';
+  }
+  if (value == null || value.toString().trim().isEmpty) return 'Belum diisi';
+  return value.toString();
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
@@ -2625,12 +2639,25 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
     if (ok == true) {
       await _runBusy(() async {
         final now = DateTime.now();
+        final wargaId = (_profile['wargaId'] ?? '').toString();
+        final residentSnap = wargaId.isEmpty
+            ? null
+            : await Db.module('sensus').doc(wargaId).get();
+        final residentData = residentSnap?.data() ?? <String, dynamic>{};
         final ref = Db.module('pelayanan_surat').doc();
         await ref.set({
           'nomorPengajuan': 'SR-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${ref.id.substring(0, 5).toUpperCase()}',
           'jenisSurat': type, 'keperluan': purpose.text.trim(), 'catatanPemohon': note.text.trim(),
-          'pemohonUid': _uid, 'pemohonNama': _name(), 'wargaId': (_profile['wargaId'] ?? '').toString(),
-          'telepon': (_profile['telepon'] ?? '').toString(), ..._areaPayload(),
+          'pemohonUid': _uid,
+          'pemohonNama': (residentData['nama'] ?? _name()).toString(),
+          'wargaId': wargaId,
+          'telepon': (residentData['telepon'] ?? _profile['telepon'] ?? '').toString(),
+          ..._areaPayload(),
+          'nik': (residentData['nik'] ?? _profile['nik'] ?? '').toString(),
+          'noKK': (residentData['noKK'] ?? _profile['noKK'] ?? '').toString(),
+          'alamat': (residentData['alamat'] ?? _profile['alamat'] ?? '').toString(),
+          'rt': (residentData['rt'] ?? _profile['rt'] ?? '').toString(),
+          'rw': (residentData['rw'] ?? _profile['rw'] ?? '').toString(),
           'status': 'diajukan', 'catatanPetugas': '',
           'riwayatStatus': [{'status': 'diajukan', 'olehUid': _uid, 'olehNama': _name(), 'waktu': Timestamp.now(), 'catatan': 'Pengajuan dibuat'}],
           'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
@@ -6047,7 +6074,7 @@ class _InformasiDiriPageState extends State<InformasiDiriPage>{
     }
   }
 
-  @override Widget build(BuildContext context){final user=Db.auth.currentUser; if(user==null)return const Scaffold(body:Center(child:Text('Silakan login kembali.')));return Scaffold(appBar:AppBar(title:const Text('Informasi Diri')),body:StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.user(user.uid).snapshots(),builder:(context,userSnap){if(!userSnap.hasData)return const Center(child:CircularProgressIndicator());final profile=userSnap.data!.data()??{};final wargaId=(profile['wargaId']??'').toString();if(wargaId.isEmpty)return const Center(child:Padding(padding:EdgeInsets.all(24),child:Text('Akun ini belum terhubung dengan data Sensus. Silakan hubungi Admin/Owner.')));return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.module('sensus').doc(wargaId).snapshots(),builder:(context,snap){if(snap.hasError)return Center(child:Text('Gagal memuat Sensus: ${snap.error}'));if(!snap.hasData)return const Center(child:CircularProgressIndicator());final data=snap.data!.data();if(data==null)return const Center(child:Text('Data Sensus milik akun ini tidak ditemukan.'));final entries=data.entries.where((e)=>!{'roles','role','accountUid','wargaId','createdAt','createdBy','updatedAt','updatedBy'}.contains(e.key));final roles=(profile['roles'] is List)?(profile['roles'] as List).join(', '):(profile['role']??'warga').toString();return ListView(padding:const EdgeInsets.all(16),children:[Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFFFCEAEA),borderRadius:BorderRadius.circular(16)),child:const Text('Data ini terhubung langsung dengan Sensus Penduduk. Nama asli, NIK, Nomor KK, dan Role dikunci untuk menjaga keakuratan identitas.')),const SizedBox(height:12),Card(child:ListTile(title:const Text('Role / Hak Akses'),subtitle:Text(roles),trailing:const Icon(Icons.lock_outline))),...entries.map((e){final isLocked={'nama','nik','noKK'}.contains(e.key);final labels={'nama':'Nama Asli','nik':'NIK','noKK':'Nomor KK','jenisKelamin':'Jenis kelamin','tempatLahir':'Tempat lahir','tanggalLahir':'Tanggal lahir','telepon':'Nomor HP / WhatsApp','agama':'Agama','statusPerkawinan':'Status perkawinan','pendidikan':'Pendidikan','pekerjaan':'Pekerjaan','hubunganKeluarga':'Hubungan keluarga','kawil':'Kawil / Dusun','rw':'RW','rt':'RT','alamat':'Alamat'};return Card(child:ListTile(title:Text(labels[e.key]??e.key),subtitle:Text(e.value.toString().isEmpty?'Belum diisi':e.value.toString()),trailing:isLocked?const Icon(Icons.lock_outline,size:18):null));}),const SizedBox(height:12),StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:_migrationConfig.snapshots(),builder:(context,lockSnap){final lockedForUpdate=lockSnap.data?.data()?['lockResidentEdits']==true;return Column(children:[if(lockedForUpdate)Container(width:double.infinity,padding:const EdgeInsets.all(14),margin:const EdgeInsets.only(bottom:10),decoration:BoxDecoration(color:Colors.orange.shade50,borderRadius:BorderRadius.circular(12),border:Border.all(color:Colors.orange.shade200)),child:const Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(Icons.warning_amber_rounded,color:Colors.orange),SizedBox(width:8),Expanded(child:Text('Pembaruan Data Sensus sedang berlangsung. Untuk sementara Anda hanya dapat melihat data. Perubahan data pribadi akan dibuka kembali setelah proses selesai.'))])),SizedBox(width:double.infinity,child:FilledButton.icon(onPressed:lockedForUpdate?null:()=>edit(data,wargaId),icon:Icon(lockedForUpdate?Icons.lock_outline:Icons.edit_outlined),label:Text(lockedForUpdate?'Perubahan Data Dikunci':'Edit / Perbarui Data')))]);})]);});}));}
+  @override Widget build(BuildContext context){final user=Db.auth.currentUser; if(user==null)return const Scaffold(body:Center(child:Text('Silakan login kembali.')));return Scaffold(appBar:AppBar(title:const Text('Informasi Diri')),body:StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.user(user.uid).snapshots(),builder:(context,userSnap){if(!userSnap.hasData)return const Center(child:CircularProgressIndicator());final profile=userSnap.data!.data()??{};final wargaId=(profile['wargaId']??'').toString();if(wargaId.isEmpty)return const Center(child:Padding(padding:EdgeInsets.all(24),child:Text('Akun ini belum terhubung dengan data Sensus. Silakan hubungi Admin/Owner.')));return StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:Db.module('sensus').doc(wargaId).snapshots(),builder:(context,snap){if(snap.hasError)return Center(child:Text('Gagal memuat Sensus: ${snap.error}'));if(!snap.hasData)return const Center(child:CircularProgressIndicator());final data=snap.data!.data();if(data==null)return const Center(child:Text('Data Sensus milik akun ini tidak ditemukan.'));final entries=data.entries.where((e)=>!{'roles','role','accountUid','wargaId','createdAt','createdBy','updatedAt','updatedBy'}.contains(e.key));final roles=(profile['roles'] is List)?(profile['roles'] as List).join(', '):(profile['role']??'warga').toString();return ListView(padding:const EdgeInsets.all(16),children:[Container(padding:const EdgeInsets.all(14),decoration:BoxDecoration(color:const Color(0xFFFCEAEA),borderRadius:BorderRadius.circular(16)),child:const Text('Data ini terhubung langsung dengan Sensus Penduduk. Nama asli, NIK, Nomor KK, dan Role dikunci untuk menjaga keakuratan identitas.')),const SizedBox(height:12),Card(child:ListTile(title:const Text('Role / Hak Akses'),subtitle:Text(roles),trailing:const Icon(Icons.lock_outline))),...entries.map((e){final isLocked={'nama','nik','noKK'}.contains(e.key);final labels={'nama':'Nama Asli','nik':'NIK','noKK':'Nomor KK','jenisKelamin':'Jenis kelamin','tempatLahir':'Tempat lahir','tanggalLahir':'Tanggal lahir','telepon':'Nomor HP / WhatsApp','agama':'Agama','statusPerkawinan':'Status perkawinan','pendidikan':'Pendidikan','pekerjaan':'Pekerjaan','hubunganKeluarga':'Hubungan keluarga','kawil':'Kawil / Dusun','rw':'RW','rt':'RT','alamat':'Alamat'};return Card(child:ListTile(title:Text(labels[e.key]??e.key),subtitle:Text(displayFirestoreValue(e.value)),trailing:isLocked?const Icon(Icons.lock_outline,size:18):null));}),const SizedBox(height:12),StreamBuilder<DocumentSnapshot<Map<String,dynamic>>>(stream:_migrationConfig.snapshots(),builder:(context,lockSnap){final lockedForUpdate=lockSnap.data?.data()?['lockResidentEdits']==true;return Column(children:[if(lockedForUpdate)Container(width:double.infinity,padding:const EdgeInsets.all(14),margin:const EdgeInsets.only(bottom:10),decoration:BoxDecoration(color:Colors.orange.shade50,borderRadius:BorderRadius.circular(12),border:Border.all(color:Colors.orange.shade200)),child:const Row(crossAxisAlignment:CrossAxisAlignment.start,children:[Icon(Icons.warning_amber_rounded,color:Colors.orange),SizedBox(width:8),Expanded(child:Text('Pembaruan Data Sensus sedang berlangsung. Untuk sementara Anda hanya dapat melihat data. Perubahan data pribadi akan dibuka kembali setelah proses selesai.'))])),SizedBox(width:double.infinity,child:FilledButton.icon(onPressed:lockedForUpdate?null:()=>edit(data,wargaId),icon:Icon(lockedForUpdate?Icons.lock_outline:Icons.edit_outlined),label:Text(lockedForUpdate?'Perubahan Data Dikunci':'Edit / Perbarui Data')))]);})]);});}));}
 }
 
 class EditProfilePage extends StatefulWidget {
