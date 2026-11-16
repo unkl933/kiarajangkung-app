@@ -485,11 +485,20 @@ class PhotoService {
     final result = await _request({'action': 'sendSosNotification', 'sosId': sosId});
     final failed = (result['pushGagal'] as num?)?.toInt() ?? 0;
     final recipients = (result['penerimaInbox'] as num?)?.toInt() ?? 0;
+    final detail = (result['catatan'] ?? '').toString().trim();
     if (recipients == 0) {
-      throw Exception((result['catatan'] ?? 'Belum ada petugas penerima SOS yang cocok.').toString());
+      throw Exception(detail.isNotEmpty
+          ? detail
+          : 'Belum ada petugas penerima SOS yang cocok.');
     }
     if (failed > 0) {
-      throw Exception('Inbox petugas tersimpan, tetapi $failed perangkat gagal menerima push.');
+      throw Exception(detail.isNotEmpty
+          ? 'Inbox petugas tersimpan, tetapi push gagal: $detail'
+          : 'Inbox petugas tersimpan, tetapi $failed perangkat gagal menerima push.');
+    }
+    if (((result['pushTerkirim'] as num?)?.toInt() ?? 0) == 0 &&
+        detail.isNotEmpty) {
+      throw Exception(detail);
     }
     return result;
   }
