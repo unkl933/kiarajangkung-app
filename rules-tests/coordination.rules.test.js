@@ -41,11 +41,11 @@ async function seed() {
     await setDoc(ref(db, 'wilayah_rw', 'rw-1'), { kawilId: 'kw-1' });
     await setDoc(ref(db, 'wilayah_rt', 'rt-1'), { rwId: 'rw-1' });
     await setDoc(ref(db, 'koordinasi_instruksi', 'instruksi-1'), {
-      ...scoped('kawil', { targetLevel: 'rw', targetId: 'rw-1' }),
+      ...scoped('kawil', { targetLevel: 'rw', targetId: 'rw-1', rwId: 'rw-1' }),
       judul: 'Instruksi kerja bakti',
     });
     await setDoc(ref(db, 'koordinasi_tugas', 'tugas-rt-1'), {
-      ...scoped('rw', { targetLevel: 'rt', targetId: 'rt-1' }),
+      ...scoped('rw', { targetLevel: 'rt', targetId: 'rt-1', rtId: 'rt-1' }),
       judul: 'Pendataan warga',
     });
     await setDoc(ref(db, 'koordinasi_tugas', 'tugas-rt-lain'), {
@@ -111,9 +111,9 @@ test('Ketua RT tidak dapat membuat instruksi atau tugas hierarki', async () => {
   }));
 });
 
-test('warga dapat membaca koordinasi yang ditandai publik tetapi bukan dokumen internal', async () => {
+test('warga tidak dapat membaca forum koordinasi, termasuk dokumen bertanda publik', async () => {
   const db = env.authenticatedContext('warga').firestore();
-  await assertSucceeds(getDoc(ref(db, 'koordinasi_forum', 'forum-publik')));
+  await assertFails(getDoc(ref(db, 'koordinasi_forum', 'forum-publik')));
   await assertFails(getDoc(ref(db, 'koordinasi_forum', 'forum-rw')));
 });
 
