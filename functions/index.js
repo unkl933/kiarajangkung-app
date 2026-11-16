@@ -246,7 +246,7 @@ function complaintRecipients(users, complaint, nextStatus, previousStatus) {
     const roles = roleSet(user);
     return roles.has(role) && keys.every(key => same(key) && String(user[key] || '').trim() === same(key));
   };
-  const stage = nextStatus === 'menunggu_validasi_rt' && !previousStatus ? 'rt' :
+  const stage = nextStatus === 'menunggu_validasi_rt' && (!previousStatus || previousStatus === 'perlu_perbaikan_rt') ? 'rt' :
     nextStatus === 'menunggu_validasi_rw' ? 'rw' :
     nextStatus === 'menunggu_validasi_kawil' ? 'kawil' : '';
   if (stage) {
