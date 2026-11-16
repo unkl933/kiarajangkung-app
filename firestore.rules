@@ -418,6 +418,70 @@ function s2ComplaintHasReason() {
     request.resource.data.get('catatanPetugas', '').size() > 0;
 }
 
+function s2ComplaintRtAdvance(currentStatus, nextStatus) {
+  return s2HasRole('ketua_rt') &&
+    resource.data.get('rtId', '') == s2Profile().get('rtId', '') &&
+    currentStatus == 'menunggu_validasi_rt' &&
+    nextStatus == 'menunggu_validasi_rw';
+}
+
+function s2ComplaintRwAdvance(currentStatus, nextStatus) {
+  return s2HasRole('ketua_rw') &&
+    resource.data.get('rwId', '') == s2Profile().get('rwId', '') &&
+    currentStatus == 'menunggu_validasi_rw' &&
+    nextStatus == 'menunggu_validasi_kawil';
+}
+
+function s2ComplaintKawilAdvance(currentStatus, nextStatus) {
+  return s2HasRole('perangkat_kawil') &&
+    resource.data.get('kawilId', '') == s2Profile().get('kawilId', '') && (
+      (currentStatus == 'menunggu_validasi_kawil' && nextStatus == 'terverifikasi') ||
+      (currentStatus == 'terverifikasi' && nextStatus == 'ditindaklanjuti') ||
+      (currentStatus == 'ditindaklanjuti' && nextStatus == 'selesai' &&
+        request.resource.data.get('catatanPenyelesaian', '') is string &&
+        request.resource.data.get('catatanPenyelesaian', '').size() > 0 &&
+        request.resource.data.get('diselesaikanOlehUid', '') == request.auth.uid)
+    );
+}
+
+function s2ComplaintRtReturn(currentStatus, nextStatus) {
+  return s2HasRole('ketua_rt') &&
+    resource.data.get('rtId', '') == s2Profile().get('rtId', '') &&
+    currentStatus == 'menunggu_validasi_rt' &&
+    nextStatus in ['perlu_perbaikan_rt', 'ditolak'] &&
+    s2ComplaintHasReason();
+}
+
+function s2ComplaintRwReturn(currentStatus, nextStatus) {
+  return s2HasRole('ketua_rw') &&
+    resource.data.get('rwId', '') == s2Profile().get('rwId', '') &&
+    currentStatus == 'menunggu_validasi_rw' &&
+    nextStatus in ['perlu_perbaikan_rw', 'ditolak'] &&
+    s2ComplaintHasReason();
+}
+
+function s2ComplaintKawilReturn(currentStatus, nextStatus) {
+  return s2HasRole('perangkat_kawil') &&
+    resource.data.get('kawilId', '') == s2Profile().get('kawilId', '') &&
+    currentStatus == 'menunggu_validasi_kawil' &&
+    nextStatus in ['perlu_perbaikan_kawil', 'ditolak'] &&
+    s2ComplaintHasReason();
+}
+
+function s2ComplaintWargaResubmit(currentStatus, nextStatus) {
+  return resource.data.get('pemohonUid', '') == request.auth.uid &&
+    ((currentStatus == 'perlu_perbaikan_rt' && nextStatus == 'menunggu_validasi_rt') ||
+     (currentStatus == 'perlu_perbaikan_rw' && nextStatus == 'menunggu_validasi_rw') ||
+     (currentStatus == 'perlu_perbaikan_kawil' && nextStatus == 'menunggu_validasi_kawil')) &&
+    s2OwnScopedCreate();
+}
+
+function s2ComplaintAdminUpdate(nextStatus) {
+  return s2Admin() &&
+    (!(nextStatus in ['ditolak', 'perlu_perbaikan_rt', 'perlu_perbaikan_rw', 'perlu_perbaikan_kawil']) ||
+      s2ComplaintHasReason());
+}
+
 function s2CanUpdateComplaint() {
   let changed = request.resource.data.diff(resource.data).affectedKeys();
   let nextStatus = request.resource.data.get('status', resource.data.get('status', ''));
@@ -431,39 +495,17 @@ function s2CanUpdateComplaint() {
     'judul', 'kategori', 'prioritas', 'uraian', 'lokasi', 'catatanPemohon',
     'status', 'updatedAt', 'riwayatStatus'
   ]);
-  let rtAdvance = s2HasRole('ketua_rt') &&
-    resource.data.get('rtId', '') == s2Profile().get('rtId', '') &&
-    currentStatus == 'menunggu_validasi_rt' && nextStatus == 'menunggu_validasi_rw';
-  let rwAdvance = s2HasRole('ketua_rw') &&
-    resource.data.get('rwId', '') == s2Profile().get('rwId', '') &&
-    currentStatus == 'menunggu_validasi_rw' && nextStatus == 'menunggu_validasi_kawil';
-  let kawilAdvance = s2HasRole('perangkat_kawil') &&
-    resource.data.get('kawilId', '') == s2Profile().get('kawilId', '') && (
-    (currentStatus == 'menunggu_validasi_kawil' && nextStatus == 'terverifikasi') ||
-    (currentStatus == 'terverifikasi' && nextStatus == 'ditindaklanjuti') ||
-    (currentStatus == 'ditindaklanjuti' && nextStatus == 'selesai' &&
-      request.resource.data.get('catatanPenyelesaian', '') is string &&
-      request.resource.data.get('catatanPenyelesaian', '').size() > 0 &&
-      request.resource.data.get('diselesaikanOlehUid', '') == request.auth.uid)
-  );
-  let rtReturn = s2HasRole('ketua_rt') && resource.data.get('rtId', '') == s2Profile().get('rtId', '') && currentStatus == 'menunggu_validasi_rt' &&
-    nextStatus in ['perlu_perbaikan_rt', 'ditolak'] && s2ComplaintHasReason();
-  let rwReturn = s2HasRole('ketua_rw') && resource.data.get('rwId', '') == s2Profile().get('rwId', '') && currentStatus == 'menunggu_validasi_rw' &&
-    nextStatus in ['perlu_perbaikan_rw', 'ditolak'] && s2ComplaintHasReason();
-  let kawilReturn = s2HasRole('perangkat_kawil') && resource.data.get('kawilId', '') == s2Profile().get('kawilId', '') && currentStatus == 'menunggu_validasi_kawil' &&
-    nextStatus in ['perlu_perbaikan_kawil', 'ditolak'] && s2ComplaintHasReason();
-  let wargaResubmit = resource.data.get('pemohonUid', '') == request.auth.uid &&
-    ((currentStatus == 'perlu_perbaikan_rt' && nextStatus == 'menunggu_validasi_rt') ||
-     (currentStatus == 'perlu_perbaikan_rw' && nextStatus == 'menunggu_validasi_rw') ||
-     (currentStatus == 'perlu_perbaikan_kawil' && nextStatus == 'menunggu_validasi_kawil')) &&
-    s2OwnScopedCreate();
-  let adminUpdate = s2Admin() &&
-    (!(nextStatus in ['ditolak', 'perlu_perbaikan_rt', 'perlu_perbaikan_rw', 'perlu_perbaikan_kawil']) ||
-      s2ComplaintHasReason());
   return s2SignedIn() && allowedFields && s2ComplaintHistoryAppended() && (
-    (s2InArea(resource.data) && (rtAdvance || rwAdvance || kawilAdvance ||
-      rtReturn || rwReturn || kawilReturn)) ||
-    (wargaResubmit && wargaFieldsOnly) || adminUpdate
+    (s2InArea(resource.data) && (
+      s2ComplaintRtAdvance(currentStatus, nextStatus) ||
+      s2ComplaintRwAdvance(currentStatus, nextStatus) ||
+      s2ComplaintKawilAdvance(currentStatus, nextStatus) ||
+      s2ComplaintRtReturn(currentStatus, nextStatus) ||
+      s2ComplaintRwReturn(currentStatus, nextStatus) ||
+      s2ComplaintKawilReturn(currentStatus, nextStatus)
+    )) ||
+    (s2ComplaintWargaResubmit(currentStatus, nextStatus) && wargaFieldsOnly) ||
+    s2ComplaintAdminUpdate(nextStatus)
   );
 }
 
