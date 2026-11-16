@@ -6826,6 +6826,19 @@ String _formatHistoryDate(dynamic value) {
   return value.toString();
 }
 
+String _formatHistoryDateTime(dynamic value) {
+  DateTime? date;
+  if (value is Timestamp) date = value.toDate();
+  if (value is DateTime) date = value;
+  if (date == null) return value == null ? 'Waktu tidak tersedia' : value.toString();
+  final day = date.day.toString().padLeft(2, '0');
+  final month = date.month.toString().padLeft(2, '0');
+  final year = date.year.toString();
+  final hour = date.hour.toString().padLeft(2, '0');
+  final minute = date.minute.toString().padLeft(2, '0');
+  return '$day-$month-$year • $hour:$minute';
+}
+
 void showRecordDetail(BuildContext context, String title, Map<String, dynamic> data) {
   final excluded = {'createdAt', 'updatedAt', 'createdBy', 'updatedBy'};
   final phone = (data['telepon'] ?? data['whatsapp'] ?? '').toString().trim();
@@ -6838,7 +6851,7 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
   final detailEntries = data.entries.where((e) =>
       !excluded.contains(e.key) &&
       !{'telepon', 'whatsapp', 'lokasiMaps', 'googleMaps', 'fotoUrl', 'foto', 'imageUrl',
-        'riwayatPemilik', 'wargaId', 'accountUid', 'roles', 'role', 'ketuaUid',
+        'riwayatPemilik', 'riwayatValidasi', 'wargaId', 'accountUid', 'roles', 'role', 'ketuaUid',
         'anggotaWarga', 'anggotaWargaIds', 'kawilId', 'rwId', 'rtId',
         'pemilikNamaSnapshot', 'pemilikMulaiPada', 'statusAkunSebelumArsip'}.contains(e.key) &&
       !e.key.endsWith('WargaId') && !e.key.endsWith('Nik') && !e.key.endsWith('Uid'));
@@ -6961,6 +6974,58 @@ void showRecordDetail(BuildContext context, String title, Map<String, dynamic> d
                     child: _RecordDetailField(label: label, value: value),
                   );
                 }),
+              ],
+              if (data['riwayatValidasi'] is List && (data['riwayatValidasi'] as List).isNotEmpty) ...[
+                const SizedBox(height: 18),
+                const _RecordDetailHeading(title: 'Riwayat validasi', icon: Icons.verified_user_outlined),
+                const SizedBox(height: 9),
+                ...((data['riwayatValidasi'] as List).whereType<Map>().map((item) {
+                  final status = (item['status'] ?? '—').toString();
+                  final petugas = (item['olehNama'] ?? 'Petugas tidak diketahui').toString();
+                  final catatan = (item['catatan'] ?? '').toString().trim();
+                  final waktu = _formatHistoryDateTime(item['waktu']);
+                  final isValid = status.toLowerCase() == 'valid';
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 9),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFEDE1E2)),
+                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Icon(isValid ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                          size: 19, color: isValid ? const Color(0xFF2E8B57) : const Color(0xFFC18A32)),
+                        const SizedBox(width: 7),
+                        Expanded(child: Text(petugas, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800))),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: isValid ? const Color(0xFFE8F5EC) : const Color(0xFFFFF4DF),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(status.toUpperCase(), style: TextStyle(
+                            fontSize: 10, fontWeight: FontWeight.w800,
+                            color: isValid ? const Color(0xFF247443) : const Color(0xFF94651D))),
+                        ),
+                      ]),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        const Icon(Icons.schedule_rounded, size: 15, color: Color(0xFF858A93)),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(waktu, style: const TextStyle(fontSize: 11, color: Color(0xFF777D86)))),
+                      ]),
+                      if (catatan.isNotEmpty) ...[
+                        const SizedBox(height: 9),
+                        const Text('Catatan', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF8A8E96))),
+                        const SizedBox(height: 3),
+                        Text(catatan, style: const TextStyle(fontSize: 12, height: 1.4, color: Color(0xFF454A53))),
+                      ],
+                    ]),
+                  );
+                })),
               ],
               if (data['riwayatPemilik'] is List && (data['riwayatPemilik'] as List).isNotEmpty) ...[
                 const SizedBox(height: 18),
