@@ -1861,14 +1861,14 @@ class RondaReportsPage extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Laporan Ronda')),
     body: StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(
-      stream: (isAdmin
-        ? Db.module('ronda_absensi')
-        : Db.module('ronda_absensi').where('uid', isEqualTo: Db.auth.currentUser?.uid ?? ''))
-        .orderBy('tanggal', descending: true).limit(150).snapshots(),
+      stream: isAdmin
+        ? Db.module('ronda_absensi').orderBy('tanggal', descending: true).limit(150).snapshots()
+        : Db.module('ronda_absensi').where('uid', isEqualTo: Db.auth.currentUser?.uid ?? '').limit(150).snapshots(),
       builder: (context, snap) {
         if (snap.hasError) return Center(child: Text('Gagal memuat laporan: ${snap.error}'));
         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-        final docs = snap.data!.docs;
+        final docs = snap.data!.docs.toList()
+          ..sort((a, b) => (b.data()['tanggal'] ?? '').toString().compareTo((a.data()['tanggal'] ?? '').toString()));
         if (docs.isEmpty) return const Center(child: Text('Belum ada data laporan ronda.'));
         final uid = Db.auth.currentUser?.uid ?? '';
         return ListView(padding: const EdgeInsets.all(16), children: [
