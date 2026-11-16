@@ -1439,7 +1439,7 @@ class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
         'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
       });
       await Db.module('notifikasi').add({
-        'jenis': 'sos', 'referensiId': sos.id,
+        'jenis': 'sos', 'referensiId': sos.id, 'dibuatOlehUid': _uid,
         'judul': 'SOS DARURAT • ${category.toUpperCase()}',
         'pesan': '${_name} membutuhkan bantuan. ${detail.text.trim()}',
         ..._area, 'targetLevel': 'darurat',
