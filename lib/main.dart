@@ -17,6 +17,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:geolocator/geolocator.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -868,7 +869,8 @@ const modules = <ModuleInfo>[
   ModuleInfo('migrasi_satu_data', 'Migrasi Satu Data Warga', 'Hubungkan data modul lama dengan Data Sensus', Icons.hub_outlined, privateData: true),
   ModuleInfo('perangkat', 'Perangkat Kampung', 'Kadus, RW, RT, kader dan DKM', Icons.badge_outlined),
   ModuleInfo('ronda', 'Jadwal Ronda', 'Jadwal dan informasi siskamling', Icons.nightlight_outlined),
-  ModuleInfo('kontak_darurat', 'Kontak Darurat', 'Babinsa, Bhabinkamtibmas dan layanan', Icons.emergency_outlined),
+  ModuleInfo('darurat', 'Darurat', 'SOS, Bhabinkamtibmas, Babinsa, IGD dan panggilan 112', Icons.emergency_outlined),
+  ModuleInfo('kontak_darurat', 'Data Kontak Darurat', 'Kelola nomor Bhabinkamtibmas, Babinsa, IGD dan ambulans', Icons.contact_phone_outlined),
   ModuleInfo('umkm', 'UMKM Warga', 'Direktori usaha dan produk lokal', Icons.storefront_outlined),
   ModuleInfo('sarana', 'Sarana & Prasarana', 'Fasilitas umum kampung', Icons.domain_outlined),
   ModuleInfo('wisata', 'Wisata Kampung', 'Destinasi dan potensi wisata', Icons.park_outlined),
@@ -959,7 +961,9 @@ class _HomePageState extends State<HomePage> {
   void openModule(String key) {
     final module = modules.firstWhere((m) => m.keyName == key);
     Navigator.push(context, MaterialPageRoute(
-      builder: (_) => ModulePage(module: module, isAdmin: isAdmin),
+      builder: (_) => module.keyName == 'darurat'
+          ? EmergencyCenterPage(profile: widget.profile, isAdmin: isAdmin)
+          : ModulePage(module: module, isAdmin: isAdmin, profile: widget.profile),
     ));
   }
 
@@ -1093,7 +1097,7 @@ class _HomePageState extends State<HomePage> {
           crossAxisCount: 3, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
           crossAxisSpacing: 9, mainAxisSpacing: 9, childAspectRatio: .98,
           children: [
-            _DashboardService(icon: Icons.emergency_rounded, title: 'Kontak Darurat', color: const Color(0xFFC94B4B), onTap: () => openModule('kontak_darurat')),
+            _DashboardService(icon: Icons.emergency_rounded, title: 'Darurat', color: const Color(0xFFC94B4B), onTap: () => openModule('darurat')),
             _DashboardService(icon: Icons.health_and_safety_rounded, title: 'Fasilitas Kesehatan', color: const Color(0xFFB84B54), onTap: () => openModule('fasilitas_kesehatan')),
             _DashboardService(icon: Icons.account_balance_rounded, title: 'Profil Kampung', color: const Color(0xFFC94B4B), onTap: () => openModule('profil_kampung')),
             _DashboardService(icon: Icons.mosque_rounded, title: 'Jadwal Sholat', color: const Color(0xFFA93643), onTap: () => _showPrayerInfo(context)),
@@ -1103,8 +1107,6 @@ class _HomePageState extends State<HomePage> {
         ),
         const SizedBox(height: 20),
         const DashboardPrayerSchedule(),
-        const SizedBox(height: 18),
-        const DashboardEmergencyPreview(),
         const SizedBox(height: 18),
         const DashboardHealthPreview(),
         const SizedBox(height: 18),
@@ -1287,6 +1289,167 @@ Future<void> _openHealthMap(BuildContext context, Map<String, dynamic> data) asy
   } else if (context.mounted) {
     showMessage(context, 'Lokasi belum tersedia atau Google Maps tidak dapat dibuka.');
   }
+}
+
+
+class EmergencyCenterPage extends StatefulWidget {
+  final Map<String, dynamic> profile;
+  final bool isAdmin;
+  const EmergencyCenterPage({super.key, this.profile = const {}, this.isAdmin = false});
+  @override
+  State<EmergencyCenterPage> createState() => _EmergencyCenterPageState();
+}
+
+class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
+  bool _sending = false;
+  String get _uid => Db.auth.currentUser?.uid ?? '';
+  String get _name => (widget.profile['nama'] ?? widget.profile['name'] ?? Db.auth.currentUser?.displayName ?? 'Warga').toString();
+  Map<String, dynamic> get _area => {
+    'kawil': widget.profile['kawil'] ?? '', 'kawilId': widget.profile['kawilId'] ?? '',
+    'rw': widget.profile['rw'] ?? '', 'rwId': widget.profile['rwId'] ?? '',
+    'rt': widget.profile['rt'] ?? '', 'rtId': widget.profile['rtId'] ?? '',
+  };
+
+  Future<Position?> _position() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return null;
+      var p = await Geolocator.checkPermission();
+      if (p == LocationPermission.denied) p = await Geolocator.requestPermission();
+      if (p == LocationPermission.denied || p == LocationPermission.deniedForever) return null;
+      return await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high, timeLimit: Duration(seconds: 15)));
+    } catch (_) { return null; }
+  }
+
+  Future<void> _sendSos() async {
+    if (_sending) return;
+    final form = GlobalKey<FormState>();
+    final detail = TextEditingController();
+    final address = TextEditingController();
+    String category = 'Kesehatan / Medis';
+    final ok = await showDialog<bool>(context: context, builder: (dc) => StatefulBuilder(
+      builder: (context, setDialog) => AlertDialog(
+        title: const Text('Kirim SOS'),
+        content: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Gunakan SOS hanya untuk keadaan darurat yang membutuhkan bantuan segera.'),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(value: category, decoration: const InputDecoration(labelText: 'Jenis darurat'),
+            items: const ['Kesehatan / Medis','Kebakaran','Keamanan','Kecelakaan','Bencana','Lainnya']
+              .map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+            onChanged: (v) => setDialog(() { if (v != null) category = v; })),
+          const SizedBox(height: 10),
+          TextFormField(controller: detail, minLines: 2, maxLines: 4,
+            decoration: const InputDecoration(labelText: 'Keterangan kejadian *'),
+            validator: (v) => (v ?? '').trim().isEmpty ? 'Keterangan wajib diisi' : null),
+          const SizedBox(height: 10),
+          TextField(controller: address, decoration: const InputDecoration(labelText: 'Patokan alamat (opsional)')),
+        ]))),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dc, false), child: const Text('Batal')),
+          FilledButton(onPressed: () { if (form.currentState!.validate()) Navigator.pop(dc, true); }, child: const Text('Kirim SOS')),
+        ],
+      ),
+    ));
+    if (ok != true) { detail.dispose(); address.dispose(); return; }
+    setState(() => _sending = true);
+    try {
+      final pos = await _position();
+      final sos = await Db.module('laporan_sos').add({
+        'jenis': category, 'uraian': detail.text.trim(), 'lokasiManual': address.text.trim(),
+        'latitude': pos?.latitude, 'longitude': pos?.longitude, 'akurasiLokasiMeter': pos?.accuracy,
+        'lokasiMaps': pos == null ? '' : 'https://www.google.com/maps/search/?api=1&query=${pos.latitude},${pos.longitude}',
+        'pemohonUid': _uid, 'pemohonNama': _name,
+        'pemohonTelepon': widget.profile['telepon'] ?? widget.profile['hp'] ?? '',
+        ..._area, 'status': 'baru', 'petugasMerespons': [],
+        'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
+      });
+      await Db.module('notifikasi').add({
+        'jenis': 'sos', 'referensiId': sos.id,
+        'judul': 'SOS DARURAT • ${category.toUpperCase()}',
+        'pesan': '${_name} membutuhkan bantuan. ${detail.text.trim()}',
+        ..._area, 'targetLevel': 'darurat',
+        'targetRoles': ['ketua_rt','ketua_rw','perangkat_kawil','admin','owner'],
+        'status': 'baru', 'createdAt': FieldValue.serverTimestamp(),
+      });
+      if (mounted) showMessage(context, pos == null
+        ? 'SOS tercatat. GPS belum tersedia; petugas perlu menghubungi pelapor.'
+        : 'SOS berhasil dikirim beserta lokasi GPS.');
+    } catch (e) {
+      if (mounted) showMessage(context, 'SOS gagal dikirim: $e');
+    } finally {
+      detail.dispose(); address.dispose();
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  IconData _icon(Map<String, dynamic> d) {
+    final v = (d['kategori'] ?? d['judul'] ?? d['nama'] ?? '').toString().toLowerCase();
+    if (v.contains('babinsa')) return Icons.military_tech_outlined;
+    if (v.contains('bhabin')) return Icons.local_police_outlined;
+    if (v.contains('igd') || v.contains('ambulans') || v.contains('medis')) return Icons.local_hospital_outlined;
+    return Icons.emergency_outlined;
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Layanan Darurat')),
+    body: ListView(padding: const EdgeInsets.all(16), children: [
+      Container(padding: const EdgeInsets.all(18), decoration: BoxDecoration(
+        color: const Color(0xFFFFF1F0), borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFF2C5C2))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Butuh pertolongan segera?', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+          const SizedBox(height: 7),
+          const Text('Kirim SOS kepada pengurus wilayah. Untuk kondisi yang mengancam keselamatan, hubungi 112 atau petugas terkait.'),
+          const SizedBox(height: 14),
+          SizedBox(width: double.infinity, child: FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFC62828), padding: const EdgeInsets.symmetric(vertical: 15)),
+            onPressed: _sending ? null : _sendSos,
+            icon: _sending ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.sos_rounded),
+            label: Text(_sending ? 'Mengirim SOS...' : 'SOS • MINTA BANTUAN'))),
+        ])),
+      const SizedBox(height: 12),
+      Card(child: ListTile(
+        leading: const CircleAvatar(backgroundColor: Color(0xFFE5F3E9), child: Icon(Icons.call, color: Color(0xFF218447))),
+        title: const Text('Telepon Darurat 112', style: TextStyle(fontWeight: FontWeight.w800)),
+        subtitle: const Text('Panggilan langsung melalui jaringan telepon'),
+        trailing: const Icon(Icons.phone_in_talk, color: Color(0xFF218447)),
+        onTap: () => _openPhone(context, '112'))),
+      const SizedBox(height: 18),
+      const _DashboardSectionTitle(title: 'Bhabinkamtibmas • Babinsa • IGD / Ambulans'),
+      const SizedBox(height: 8),
+      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: Db.module('kontak_darurat').snapshots(),
+        builder: (context, snap) {
+          if (snap.hasError) return Text('Kontak gagal dimuat: ${snap.error}');
+          if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+          if (snap.data!.docs.isEmpty) return const Text('Kontak petugas belum didaftarkan.');
+          return Column(children: snap.data!.docs.map((doc) {
+            final d = doc.data();
+            final title = (d['judul'] ?? d['nama'] ?? d['kategori'] ?? 'Petugas darurat').toString();
+            final phone = (d['telepon'] ?? '').toString().trim();
+            final category = (d['kategori'] ?? '').toString();
+            final note = (d['catatan'] ?? d['keterangan'] ?? '').toString();
+            return Card(margin: const EdgeInsets.only(bottom: 8), child: ListTile(
+              leading: CircleAvatar(child: Icon(_icon(d))),
+              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text([if (category.isNotEmpty) category, if (phone.isNotEmpty) phone, if (note.isNotEmpty) note].join(' • ')),
+              trailing: phone.isEmpty ? null : IconButton(icon: const Icon(Icons.call, color: Color(0xFF218447)),
+                onPressed: () => _openPhone(context, phone)),
+            ));
+          }).toList());
+        }),
+      if (widget.isAdmin) ...[
+        const SizedBox(height: 8),
+        OutlinedButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) =>
+          ModulePage(module: modules.firstWhere((m) => m.keyName == 'kontak_darurat'), isAdmin: true, profile: widget.profile))),
+          icon: const Icon(Icons.edit_outlined), label: const Text('Kelola Kontak Darurat')),
+      ],
+      const SizedBox(height: 10),
+      const Text('Laporan SOS dan antrean notifikasi disimpan di Firestore. Push notification ke HP petugas masih memerlukan Cloud Function dan aturan akses yang sesuai.',
+        style: TextStyle(fontSize: 11, color: Colors.black54)),
+    ]),
+  );
 }
 
 class DashboardEmergencyPreview extends StatelessWidget {
@@ -1970,6 +2133,7 @@ class ModulesPage extends StatelessWidget {
             final staff = isAdmin || roles.any((r) => ['perangkat_kawil','ketua_rw','ketua_rt'].contains(r));
             if (m.keyName == 'koordinasi_wilayah') return true;
             if (m.keyName == 'panel_kawil') return roles.contains('perangkat_kawil');
+            if (m.keyName == 'kontak_darurat') return isAdmin;
             return isAdmin || !['arsip_warga', 'migrasi_satu_data'].contains(m.keyName);
           }).map((m) => Card(
                 child: ListTile(
@@ -1981,7 +2145,9 @@ class ModulesPage extends StatelessWidget {
                   subtitle: Text(m.subtitle),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => ModulePage(module: m, isAdmin: isAdmin),
+                    builder: (_) => m.keyName == 'darurat'
+                        ? EmergencyCenterPage(profile: profile, isAdmin: isAdmin)
+                        : ModulePage(module: m, isAdmin: isAdmin, profile: profile),
                   )),
                 ),
               )),
@@ -3814,7 +3980,8 @@ class _KoordinasiWilayahPageState extends State<KoordinasiWilayahPage> with Sing
 class ModulePage extends StatefulWidget {
   final ModuleInfo module;
   final bool isAdmin;
-  const ModulePage({super.key, required this.module, required this.isAdmin});
+  final Map<String, dynamic> profile;
+  const ModulePage({super.key, required this.module, required this.isAdmin, this.profile = const {}});
 
   @override
   State<ModulePage> createState() => _ModulePageState();
@@ -3845,6 +4012,7 @@ class _ModulePageState extends State<ModulePage> {
   Widget build(BuildContext context) {
     final module = widget.module;
     final isAdmin = widget.isAdmin;
+    if (module.keyName == 'darurat') return EmergencyCenterPage(profile: widget.profile, isAdmin: isAdmin);
     if (module.keyName == 'profil_kampung') {
       return ProfileKampungPage(isAdmin: isAdmin);
     }
