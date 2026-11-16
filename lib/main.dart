@@ -2452,7 +2452,7 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
             now.month.toString().padLeft(2, '0') + '/' +
             now.day.toString().padLeft(2, '0') + '/' +
             ref.id.substring(0, 5).toUpperCase();
-        issuedData = {
+        final letterData = <String, dynamic>{
           'nomorPengajuan': number,
           'nomorSurat': number,
           'jenisSurat': type,
@@ -2484,7 +2484,8 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
           'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
         };
-        await ref.set(issuedData!);
+        await ref.set(letterData);
+        issuedData = letterData;
       });
       if (issuedData != null && mounted) {
         await _printApprovedLetter(issuedData!);
@@ -2723,6 +2724,9 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
       final jenis = (data['jenisSurat'] ?? 'Surat Keterangan').toString();
       final nomor = (data['nomorSurat'] ?? data['nomorPengajuan'] ?? 'Nomor ditetapkan pengurus').toString();
       final nama = (data['pemohonNama'] ?? '-').toString();
+      final nik = (data['nik'] ?? '-').toString();
+      final noKK = (data['noKK'] ?? '-').toString();
+      final alamat = (data['alamat'] ?? '-').toString();
       final keperluan = (data['keperluan'] ?? '-').toString();
       final wilayah = 'RT ${data['rt'] ?? '-'} / RW ${data['rw'] ?? '-'}';
       final tanggal = DateTime.now();
@@ -2745,6 +2749,9 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
           pw.SizedBox(height: 12),
           pw.Table(columnWidths: {0: const pw.FixedColumnWidth(105), 1: const pw.FixedColumnWidth(12), 2: const pw.FlexColumnWidth()}, children: [
             _pdfRow('Nama', nama),
+            _pdfRow('NIK', nik),
+            _pdfRow('No. KK', noKK),
+            _pdfRow('Alamat', alamat),
             _pdfRow('Wilayah', wilayah),
             _pdfRow('Keperluan', keperluan),
           ]),
