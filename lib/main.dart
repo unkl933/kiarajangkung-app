@@ -2300,6 +2300,10 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
   };
 
   Future<void> _createLetter() async {
+    if (_kawil) {
+      await _createKawilLetter();
+      return;
+    }
     final form = GlobalKey<FormState>();
     final purpose = TextEditingController();
     final note = TextEditingController();
@@ -2343,6 +2347,153 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
       });
     }
     purpose.dispose(); note.dispose();
+  }
+
+
+  Future<void> _createKawilLetter() async {
+    final kawilId = (_profile['kawilId'] ?? '').toString();
+    if (kawilId.isEmpty) {
+      showMessage(context, 'Akun Kawil belum memiliki wilayah tugas.');
+      return;
+    }
+    try {
+      final residents = (await loadActiveResidents())
+          .where((r) => (r['kawilId'] ?? '').toString() == kawilId)
+          .toList();
+      if (residents.isEmpty) {
+        showMessage(context, 'Belum ada data warga aktif pada wilayah Kawil Anda.');
+        return;
+      }
+      final resident = await showResidentPicker(
+        context, residents, title: 'Pilih warga untuk surat wilayah');
+      if (resident == null || !mounted) return;
+
+      final form = GlobalKey<FormState>();
+      final purpose = TextEditingController();
+      final note = TextEditingController();
+      String type = 'Surat Pengantar';
+      const types = [
+        'Surat Pengantar',
+        'Surat Keterangan Domisili',
+        'Surat Keterangan Usaha',
+        'Surat Keterangan Tidak Mampu',
+        'Surat Keterangan Kelahiran',
+        'Surat Keterangan Kematian',
+        'Surat Keterangan Lainnya',
+      ];
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Buat Surat Wilayah'),
+          content: SingleChildScrollView(
+            child: Form(
+              key: form,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.person_outline),
+                    title: Text((resident['nama'] ?? 'Warga').toString()),
+                    subtitle: Text('RT ' + (resident['rt'] ?? '-').toString() +
+                        ' / RW ' + (resident['rw'] ?? '-').toString()),
+                  ),
+                  DropdownButtonFormField<String>(
+                    value: type,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Jenis surat'),
+                    items: types.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                    onChanged: (v) { if (v != null) type = v; },
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: purpose,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: const InputDecoration(labelText: 'Keperluan surat *'),
+                    validator: (v) => (v ?? '').trim().isEmpty ? 'Keperluan wajib diisi' : null,
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: note,
+                    minLines: 2,
+                    maxLines: 3,
+                    decoration: const InputDecoration(labelText: 'Catatan tambahan (opsional)'),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Surat akan disimpan dengan status diterbitkan dan dapat dicetak sebagai PDF. Nomor surat otomatis perlu disesuaikan dengan tata naskah resmi kampung.',
+                    style: TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Batal')),
+            FilledButton(
+              onPressed: () { if (form.currentState!.validate()) Navigator.pop(dialogContext, true); },
+              child: const Text('Terbitkan surat'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) {
+        purpose.dispose();
+        note.dispose();
+        return;
+      }
+
+      Map<String, dynamic>? issuedData;
+      await _runBusy(() async {
+        final now = DateTime.now();
+        final ref = Db.module('pelayanan_surat').doc();
+        final number = 'KWL/' + now.year.toString() + '/' +
+            now.month.toString().padLeft(2, '0') + '/' +
+            now.day.toString().padLeft(2, '0') + '/' +
+            ref.id.substring(0, 5).toUpperCase();
+        issuedData = {
+          'nomorPengajuan': number,
+          'nomorSurat': number,
+          'jenisSurat': type,
+          'keperluan': purpose.text.trim(),
+          'catatanPemohon': note.text.trim(),
+          'pemohonUid': (resident['accountUid'] ?? '').toString(),
+          'pemohonNama': (resident['nama'] ?? '').toString(),
+          'wargaId': (resident['wargaId'] ?? '').toString(),
+          'nik': (resident['nik'] ?? '').toString(),
+          'noKK': (resident['noKK'] ?? '').toString(),
+          'alamat': (resident['alamat'] ?? '').toString(),
+          'telepon': (resident['telepon'] ?? '').toString(),
+          'kawil': (_profile['kawil'] ?? '').toString(),
+          'kawilId': kawilId,
+          'rw': (resident['rw'] ?? '').toString(),
+          'rwId': (resident['rwId'] ?? '').toString(),
+          'rt': (resident['rt'] ?? '').toString(),
+          'rtId': (resident['rtId'] ?? '').toString(),
+          'status': 'terbit',
+          'diterbitkanOlehUid': _uid,
+          'diterbitkanOlehNama': _name(),
+          'riwayatStatus': [{
+            'status': 'terbit',
+            'olehUid': _uid,
+            'olehNama': _name(),
+            'waktu': Timestamp.now(),
+            'catatan': 'Surat diterbitkan langsung oleh Kawil.',
+          }],
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+        await ref.set(issuedData!);
+      });
+      if (issuedData != null && mounted) {
+        await _printApprovedLetter(issuedData!);
+      }
+      purpose.dispose();
+      note.dispose();
+    } catch (e) {
+      if (mounted) showMessage(context, 'Gagal membuat surat wilayah: ' + e.toString());
+    }
   }
 
   Future<void> _createComplaint() async {
@@ -2553,7 +2704,7 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
             if (status == 'diverifikasi_rw' && _canReviewKawil) FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeStatus(doc, 'disetujui', note: 'Disetujui oleh Kawil'); }, icon: const Icon(Icons.verified), label: const Text('Setujui surat')),
             if (status != 'disetujui' && status != 'ditolak' && _staff) OutlinedButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeStatus(doc, 'perlu_perbaikan', note: 'Mohon lengkapi atau perbaiki persyaratan'); }, icon: const Icon(Icons.edit_note), label: const Text('Minta perbaikan')),
             if (status != 'disetujui' && status != 'ditolak' && _staff) TextButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeStatus(doc, 'ditolak', note: 'Pengajuan tidak dapat diproses'); }, icon: const Icon(Icons.cancel_outlined), label: const Text('Tolak pengajuan')),
-            if (status == 'disetujui') FilledButton.icon(onPressed: () { Navigator.pop(sheetContext); _printApprovedLetter(data); }, icon: const Icon(Icons.picture_as_pdf_outlined), label: const Text('Cetak / Simpan PDF Surat')),
+            if (status == 'disetujui' || status == 'terbit') FilledButton.icon(onPressed: () { Navigator.pop(sheetContext); _printApprovedLetter(data); }, icon: const Icon(Icons.picture_as_pdf_outlined), label: const Text('Cetak / Simpan PDF Surat')),
           ],
           if (kind == 'pengaduan' && _staff && status != 'selesai' && status != 'ditolak') ...[
             FilledButton.icon(onPressed: () async { Navigator.pop(sheetContext); await _changeStatus(doc, 'ditindaklanjuti', note: 'Pengaduan sedang ditindaklanjuti'); }, icon: const Icon(Icons.handyman_outlined), label: const Text('Tandai ditindaklanjuti')),
@@ -2704,7 +2855,7 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
           _records(_activityQuery(), 'kegiatan'), _records(_reportQuery(), 'laporan'),
         ]), if (_busy) const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator())]),
         floatingActionButton: _tabs.index == 0
-          ? FloatingActionButton.extended(onPressed: _busy ? null : _createLetter, icon: const Icon(Icons.add), label: const Text('Ajukan Surat'))
+          ? FloatingActionButton.extended(onPressed: _busy ? null : _createLetter, icon: const Icon(Icons.add), label: Text(_kawil ? 'Buat Surat Wilayah' : 'Ajukan Surat'))
           : _tabs.index == 1
             ? FloatingActionButton.extended(onPressed: _busy ? null : _createComplaint, icon: const Icon(Icons.add), label: const Text('Buat Pengaduan'))
             : _tabs.index == 2 && _staff
