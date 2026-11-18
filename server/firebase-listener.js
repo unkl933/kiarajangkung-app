@@ -33,8 +33,13 @@ function normalizeLevel(value) {
 function isActiveProfile(profile) {
   return String(profile.status || '').trim().toLowerCase() === ACTIVE_STATUS;
 }
+function isOwnerOrAdmin(profile) {
+  return getRoles(profile).some(role => role === 'owner' || role === 'admin');
+}
 function matchesArea(notification, profile, level) {
-  if (level === 'kampung') return true;
+  // Owner dan Admin menerima semua notifikasi, termasuk yang ditujukan
+  // khusus ke wilayah tertentu, untuk kebutuhan pemantauan kampung.
+  if (isOwnerOrAdmin(profile) || level === 'kampung') return true;
   const keys = level === 'kawil' ? ['kawilId'] : level === 'rw' ? ['kawilId', 'rwId'] : ['kawilId', 'rwId', 'rtId'];
   return keys.every(key => {
     const targetId = String(notification[key] || '').trim();
@@ -43,6 +48,8 @@ function matchesArea(notification, profile, level) {
   });
 }
 function matchesTargetRoles(notification, profile) {
+  // Pembatasan targetRoles tidak mengecualikan Owner/Admin.
+  if (isOwnerOrAdmin(profile)) return true;
   const targetRoles = Array.isArray(notification.targetRoles) ? notification.targetRoles.map(normalizeRole).filter(Boolean) : [];
   return targetRoles.length === 0 || targetRoles.some(role => getRoles(profile).includes(role));
 }
