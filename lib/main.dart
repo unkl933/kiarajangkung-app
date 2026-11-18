@@ -4745,9 +4745,7 @@ class _KoordinasiWilayahPageState extends State<KoordinasiWilayahPage> with Sing
     } catch (error, stackTrace) {
       debugPrint('[Notifikasi] GAGAL membuat antrean $jenis: $error');
       debugPrintStack(stackTrace: stackTrace);
-      if (mounted) {
-        showMessage(context, 'Data tersimpan, tetapi antrean push gagal dibuat: $error');
-      }
+      throw Exception('Data utama tersimpan, tetapi antrean push gagal dibuat: $error');
     }
   }
 
