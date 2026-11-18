@@ -1381,9 +1381,11 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
               final data = doc.data();
               final read = data['isRead'] == true || data['readAt'] != null;
               final isSos = _isSos(data);
-              final type = (data['kategori'] ?? data['jenis'] ?? 'informasi').toString();
+              final type = (data['jenis'] ?? data['kategori'] ?? 'informasi').toString();
               final icon = isSos ? Icons.sos_rounded
                   : type == 'pengaduan' ? Icons.support_agent_outlined
+                  : type == 'pelayanan' ? Icons.assignment_turned_in_outlined
+                  : type == 'agenda' || type == 'kegiatan' ? Icons.event_note_outlined
                   : type == 'pengumuman' ? Icons.campaign_outlined
                   : Icons.notifications_active_outlined;
               final date = _date(data['createdAt']);
