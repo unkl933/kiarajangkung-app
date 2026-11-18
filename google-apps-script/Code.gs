@@ -11,7 +11,7 @@ function doGet() {
   return json_({
     ok: true,
     message: 'Kampung Digital API aktif.',
-    build: 'SOS-FCM-CODEGS-20261118-V3'
+    build: 'SOS-FCM-CODEGS-20261118-V5'
   });
 }
 
@@ -145,7 +145,7 @@ function doPost(e) {
       error: String(err && err.message ? err.message : err),
       tahap: tahap,
       action: data.action || 'tidak terkirim',
-      build: 'SOS-FCM-CODEGS-20261118-V4'
+      build: 'SOS-FCM-CODEGS-20261118-V5'
     });
   }
 }
@@ -181,8 +181,6 @@ function sendSosNotification_(data, callerUid, apiKey, projectId) {
       return String(r).toLowerCase();
     }) : [];
     var primaryRole = String(profile.role || '').toLowerCase();
-    // Akun multi-role tetap dihitung satu kali karena penerima ditambahkan
-    // melalui satu kondisi gabungan, bukan satu entri per role.
     var isOwnerAdmin = primaryRole === 'owner' || primaryRole === 'admin' ||
       roles.indexOf('owner') >= 0 || roles.indexOf('admin') >= 0;
     var isKawilRole = primaryRole === 'perangkat_kawil' || primaryRole === 'kawil' ||
@@ -273,7 +271,7 @@ function sendSosNotification_(data, callerUid, apiKey, projectId) {
     pushTerkirim: sent, pushGagal: failed, perangkatTanpaToken: noToken,
     detailError: fcmErrors,
     catatan: !targets.length
-      ? 'Belum ditemukan akun petugas aktif (Owner/Admin/Kawil/RW/RT) yang cocok dengan wilayah SOS.'
+      ? 'Belum ditemukan akun Owner/Admin aktif atau Kawil aktif yang cocok dengan wilayah SOS.'
       : (failed > 0 ? 'FCM menolak ' + failed + ' pengiriman. ' + fcmErrors.join(' | ')
         : (sent === 0 ? 'Inbox tersimpan, tetapi belum ada token FCM pada perangkat petugas.' : ''))
   };
@@ -1013,3 +1011,432 @@ function commitFirestoreWrites_(projectId, apiKey, idToken, writes) {
     method: 'post', contentType: 'application/json',
     headers: { Authorization: 'Bearer ' + idToken },
     payload: JSON.stringify({ writes: writes }), muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) throw new Error('Gagal menyimpan penugasan wilayah: ' + response.getContentText());
+}
+
+/** Menolak akses API bagi akun yang tidak aktif. */
+function verifyActiveUser_(uid, idToken, apiKey, projectId) {
+  var profile = getUserProfile_(uid, idToken, apiKey, projectId);
+  var status = String(profile.status || '').toLowerCase();
+  if (status !== 'aktif') throw new Error('Akun tidak aktif atau status akun belum valid. Hubungi Owner/Admin.');
+  return profile;
+}
+
+/** Hanya Owner/Admin boleh menjalankan operasi administratif. */
+function verifyAdmin_(uid, idToken, apiKey, projectId) {
+  var profile = verifyActiveUser_(uid, idToken, apiKey, projectId);
+  var role = String(profile.role || '').toLowerCase();
+  var roles = Array.isArray(profile.roles) ? profile.roles.map(function(r) { return String(r).toLowerCase(); }) : [];
+  if (['owner', 'admin'].indexOf(role) < 0 &&
+      !roles.some(function(r) { return r === 'owner' || r === 'admin'; })) {
+    throw new Error('Hanya Owner/Admin yang boleh melakukan tindakan ini.');
+  }
+}
+
+function getUserProfile_(uid, idToken, apiKey, projectId) {
+  var url = 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(projectId) +
+    '/databases/(default)/documents/users/' + encodeURIComponent(uid) + '?key=' + encodeURIComponent(apiKey);
+  var response = UrlFetchApp.fetch(url, {
+    method: 'get', headers: { Authorization: 'Bearer ' + idToken }, muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) throw new Error('Profil akun tidak dapat diverifikasi.');
+  var doc = JSON.parse(response.getContentText() || '{}');
+  var fields = doc.fields || {};
+  var out = {};
+  Object.keys(fields).forEach(function(key) {
+    var value = fields[key];
+    if (value.stringValue !== undefined) out[key] = value.stringValue;
+    else if (value.booleanValue !== undefined) out[key] = value.booleanValue;
+    else if (value.arrayValue && value.arrayValue.values) {
+      out[key] = value.arrayValue.values.map(function(v) { return v.stringValue || ''; });
+    }
+  });
+  return out;
+}
+
+/** Memastikan token benar-benar diterbitkan Firebase Authentication. */
+function verifyFirebaseToken_(idToken, apiKey) {
+  if (!idToken || !apiKey) throw new Error('Token login tidak tersedia.');
+  var url = 'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + encodeURIComponent(apiKey);
+  var response = UrlFetchApp.fetch(url, {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({ idToken: idToken }), muteHttpExceptions: true
+  });
+  var result = JSON.parse(response.getContentText() || '{}');
+  if (response.getResponseCode() !== 200 || !result.users || !result.users.length) {
+    throw new Error('Login Firebase tidak valid atau sudah kedaluwarsa.');
+  }
+  if (!result.users[0].localId) throw new Error('Identitas akun Firebase tidak ditemukan.');
+  return result.users[0].localId;
+}
+
+
+/**
+ * Menerima permintaan akun tanpa membuat akun Auth. NIK dan tanggal lahir
+ * hanya dipakai untuk mencocokkan data Sensus; keduanya tidak disimpan.
+ * Respons selalu generik agar endpoint tidak membocorkan keberadaan NIK.
+ */
+function requestResidentAccount_(data, apiKey, projectId) {
+  var generic = {
+    ok: true,
+    message: 'Jika data cocok dengan Sensus dan belum memiliki akun, permintaan akan diteruskan kepada Admin dan Ketua RT.'
+  };
+  var nik = String(data.nik || '').replace(/\D/g, '');
+  var dob = normalizeDobDigits_(data.tanggalLahir || data.tanggalLahirInput || '');
+  if (!/^\d{16}$/.test(nik) || !dob) return generic;
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return generic;
+  try {
+    var cache = CacheService.getScriptCache();
+    var cacheKey = 'account_request_' + Utilities.base64EncodeWebSafe(
+      Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, nik)
+    ).substring(0, 24);
+    if (cache.get(cacheKey)) return generic;
+    var oauthToken = ScriptApp.getOAuthToken();
+    if (!oauthToken) return generic;
+    var index = readFirestoreDocument_(projectId, apiKey, oauthToken,
+      'kampung/kiarajangkung/sensus_nik_index/' + nik);
+    var wargaId = index && index.wargaId ? String(index.wargaId) : findSensusWargaIdByNik_(projectId, apiKey, oauthToken, nik);
+    if (!wargaId) return generic;
+    var resident = readFirestoreDocument_(projectId, apiKey, oauthToken,
+      'kampung/kiarajangkung/sensus/' + wargaId);
+    if (!resident || String(resident.nik || '').replace(/\D/g, '') !== nik) return generic;
+    if (String(resident.accountUid || '').trim()) return generic;
+    if (normalizeDobDigits_(resident.tanggalLahir || '') !== dob) return generic;
+
+    var requestIndexPath = 'kampung/kiarajangkung/permintaan_akun_index/' + wargaId;
+    var oldIndex = readFirestoreDocument_(projectId, apiKey, oauthToken, requestIndexPath);
+    if (oldIndex && String(oldIndex.status || '') === 'menunggu') return generic;
+
+    var requestId = Utilities.getUuid();
+    var stamp = { __firestoreTimestamp: new Date().toISOString() };
+    var requestData = {
+      wargaId: wargaId,
+      nama: String(resident.nama || ''),
+      nikMask: nik.substring(0, 4) + '********' + nik.substring(12),
+      rt: String(resident.rt || ''), rw: String(resident.rw || ''),
+      rtId: String(resident.rtId || ''), rwId: String(resident.rwId || ''),
+      kawilId: String(resident.kawilId || ''),
+      status: 'menunggu',
+      createdAt: stamp, updatedAt: stamp
+    };
+    firestorePatchDocument_(projectId, apiKey, oauthToken,
+      'kampung/kiarajangkung/permintaan_akun/' + requestId, requestData);
+    firestorePatchDocument_(projectId, apiKey, oauthToken, requestIndexPath, {
+      requestId: requestId, status: 'menunggu', updatedAt: stamp
+    });
+    cache.put(cacheKey, '1', 300);
+    try {
+      notifyAccountApprovers_(projectId, apiKey, oauthToken, requestId, requestData);
+    } catch (notificationError) {
+      console.error('Permintaan akun tersimpan tetapi notifikasi gagal: ' + notificationError);
+    }
+    return generic;
+  } catch (ignored) {
+    // Jangan mengungkap apakah NIK/tanggal lahir cocok atau tidak.
+    return generic;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function findSensusWargaIdByNik_(projectId, apiKey, token, nik) {
+  var url = 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(projectId) +
+    '/databases/(default)/documents/kampung/kiarajangkung:runQuery?key=' + encodeURIComponent(apiKey);
+  var response = UrlFetchApp.fetch(url, {
+    method: 'post', contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + token },
+    payload: JSON.stringify({ structuredQuery: {
+      from: [{ collectionId: 'sensus' }],
+      where: { fieldFilter: { field: { fieldPath: 'nik' }, op: 'EQUAL', value: { stringValue: nik } } },
+      limit: 2
+    } }),
+    muteHttpExceptions: true
+  });
+  if (response.getResponseCode() !== 200) return '';
+  var rows = JSON.parse(response.getContentText() || '[]');
+  var matches = rows.filter(function(row) {
+    return row.document && row.document.name && row.document.fields &&
+      row.document.fields.nik && row.document.fields.nik.stringValue === nik;
+  });
+  if (matches.length !== 1) return '';
+  var parts = String(matches[0].document.name).split('/');
+  return parts[parts.length - 1] || '';
+}
+
+function normalizeDobDigits_(value) {
+  var raw = String(value || '').trim();
+  var digits = raw.replace(/\D/g, '');
+  if (/^\d{8}$/.test(digits)) {
+    var d = Number(digits.substring(0, 2));
+    var m = Number(digits.substring(2, 4));
+    var y = Number(digits.substring(4, 8));
+    var date = new Date(Date.UTC(y, m - 1, d));
+    if (y >= 1900 && date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d) return digits;
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+    var parts = raw.substring(0, 10).split('-');
+    var year = Number(parts[0]), month = Number(parts[1]), day = Number(parts[2]);
+    var parsed = new Date(Date.UTC(year, month - 1, day));
+    if (year >= 1900 && parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day) {
+      return String(day).padStart(2, '0') + String(month).padStart(2, '0') + String(year);
+    }
+  }
+  return '';
+}
+
+function accountRequestRoleSet_(profile) {
+  var roles = Array.isArray(profile.roles) ? profile.roles.map(function(r) { return String(r || '').toLowerCase(); }) : [];
+  if (profile.role) roles.push(String(profile.role).toLowerCase());
+  return roles;
+}
+
+function verifyAccountRequestApprover_(profile, request) {
+  var roles = accountRequestRoleSet_(profile);
+  // Owner memiliki akses penuh: dapat melihat, menyetujui, dan menolak
+  // seluruh permintaan akun tanpa batasan wilayah.
+  if (roles.indexOf('owner') >= 0) return 'owner';
+  if (roles.indexOf('admin') >= 0) return 'admin';
+  // Ketua RT hanya dapat memproses permintaan dari RT sendiri.
+  if (roles.indexOf('ketua_rt') >= 0 && String(profile.rtId || '') &&
+      String(profile.rtId || '') === String(request.rtId || '')) return 'ketua_rt';
+  throw new Error('Hanya Owner, Admin, atau Ketua RT sesuai wilayah warga yang dapat memproses permintaan ini.');
+}
+
+function approveResidentAccount_(data, actorUid, actorProfile, actorToken, apiKey, projectId) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) throw new Error('Permintaan akun sedang diproses petugas lain. Coba kembali.');
+  try {
+  var requestId = String(data.requestId || '').trim();
+  if (!requestId) throw new Error('ID permintaan tidak valid.');
+  var requestPath = 'kampung/kiarajangkung/permintaan_akun/' + requestId;
+  var request = readFirestoreDocument_(projectId, apiKey, actorToken, requestPath);
+  if (!request) throw new Error('Permintaan akun tidak ditemukan.');
+  var approverRole = verifyAccountRequestApprover_(actorProfile, request);
+  if (String(request.status || '') !== 'menunggu') throw new Error('Permintaan ini sudah diproses.');
+
+  var wargaId = String(request.wargaId || '');
+  var residentPath = 'kampung/kiarajangkung/sensus/' + wargaId;
+  var resident = readFirestoreDocument_(projectId, apiKey, actorToken, residentPath);
+  if (!resident) throw new Error('Data Sensus warga tidak ditemukan.');
+  if (String(resident.accountUid || '').trim()) throw new Error('Warga sudah memiliki akun. Periksa Manajemen Akun.');
+  var nik = String(resident.nik || '').replace(/\D/g, '');
+  var dob = normalizeDobDigits_(resident.tanggalLahir || '');
+  if (!/^\d{16}$/.test(nik) || !dob) throw new Error('NIK atau tanggal lahir pada Sensus tidak valid.');
+  if (String(request.rtId || '') && String(request.rtId) !== String(resident.rtId || '')) {
+    throw new Error('Wilayah warga berubah sejak permintaan dibuat. Minta warga mengajukan ulang.');
+  }
+  // RT hanya boleh memproses warga pada RT-nya; Admin dapat memproses semua wilayah.
+  verifyAccountRequestApprover_(actorProfile, request);
+
+  var oauthToken = ScriptApp.getOAuthToken();
+  var provision = createOrRepairResidentAccount_(
+    resident, wargaId, actorUid, apiKey, projectId, oauthToken
+  );
+
+  var stamp = { __firestoreTimestamp: new Date().toISOString() };
+  var auditId = Utilities.getUuid();
+  var writes = [
+    firestoreUpdateWrite_(projectId, residentPath, {
+      accountUid: provision.uid, akunStatus: 'Aktif', akunDisetujuiOleh: actorUid,
+      akunDisetujuiPada: stamp, akunPermintaanId: requestId
+    }),
+    firestoreUpdateWrite_(projectId, requestPath, {
+      status: 'disetujui', diprosesOlehUid: actorUid, diprosesOlehRole: approverRole,
+      diprosesPada: stamp, updatedAt: stamp
+    }),
+    firestoreUpdateWrite_(projectId, 'kampung/kiarajangkung/permintaan_akun_index/' + wargaId, {
+      requestId: requestId, status: 'disetujui', updatedAt: stamp
+    }),
+    firestoreUpdateWrite_(projectId, 'kampung/kiarajangkung/riwayat_akun/' + auditId, {
+      aksi: 'pendaftaran_disetujui', wargaId: wargaId, uid: provision.uid,
+      requestId: requestId, olehUid: actorUid, olehRole: approverRole, waktu: stamp
+    })
+  ];
+  try {
+    commitFirestoreWrites_(projectId, apiKey, oauthToken, writes);
+  } catch (commitError) {
+    // Jangan meninggalkan akun yatim yang tidak tertaut ke Sensus.
+    try {
+      var authBase = 'https://identitytoolkit.googleapis.com/v1/projects/' + encodeURIComponent(projectId) + '/accounts';
+      UrlFetchApp.fetch(authBase + ':delete', {
+        method: 'post', contentType: 'application/json',
+        headers: { Authorization: 'Bearer ' + oauthToken },
+        payload: JSON.stringify({ localId: provision.uid }), muteHttpExceptions: true
+      });
+      UrlFetchApp.fetch('https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(projectId) +
+        '/databases/(default)/documents/users/' + encodeURIComponent(provision.uid) + '?key=' + encodeURIComponent(apiKey), {
+          method: 'delete', headers: { Authorization: 'Bearer ' + oauthToken }, muteHttpExceptions: true
+        });
+    } catch (cleanupError) {
+      throw new Error('Pembuatan akun gagal ditautkan. Pembersihan otomatis juga gagal; periksa akun UID ' + provision.uid + '. Detail: ' + cleanupError);
+    }
+    throw new Error('Pembuatan akun dibatalkan karena tautan ke Sensus gagal: ' + commitError);
+  }
+  return {
+    ok: true, uid: provision.uid,
+    message: 'Pendaftaran disetujui dan akun berhasil dibuat. Username adalah NIK; password sementara tanggal lahir DDMMYYYY. Warga wajib mengganti password setelah login.'
+  };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Jika alias NIK sudah pernah dibuat tetapi pointer accountUid hilang,
+ * tautkan kembali akun yang cocok. Jangan pernah membuat akun duplikat.
+ */
+function createOrRepairResidentAccount_(resident, wargaId, actorUid, apiKey, projectId, oauthToken) {
+  var nik = String(resident.nik || '').replace(/\D/g, '');
+  var dob = normalizeDobDigits_(resident.tanggalLahir || '');
+  var email = nik + '@login.kiarajangkung.id';
+  var authBase = 'https://identitytoolkit.googleapis.com/v1/projects/' + encodeURIComponent(projectId) + '/accounts';
+  var lookup = UrlFetchApp.fetch(authBase + ':lookup', {
+    method: 'post', contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + oauthToken },
+    payload: JSON.stringify({ email: [email] }), muteHttpExceptions: true
+  });
+  if (lookup.getResponseCode() !== 200) {
+    throw new Error('Gagal memeriksa akun Firebase lama: ' + lookup.getContentText());
+  }
+  var body = JSON.parse(lookup.getContentText() || '{}');
+  var users = body.users || [];
+  if (!users.length) {
+    return provisionResident_({
+      nik: nik, nama: String(resident.nama || ''), tanggalLahir: dob,
+      telepon: String(resident.telepon || ''), alamat: String(resident.alamat || ''),
+      rt: String(resident.rt || ''), rw: String(resident.rw || ''), kawil: String(resident.kawil || ''),
+      kawilId: String(resident.kawilId || ''), rwId: String(resident.rwId || ''), rtId: String(resident.rtId || ''),
+      wargaId: wargaId, roles: ['warga']
+    }, apiKey, projectId, actorUid, oauthToken);
+  }
+  var authUser = users[0];
+  var uid = String(authUser.localId || '');
+  if (!uid || String(authUser.email || '').toLowerCase() !== email.toLowerCase()) {
+    throw new Error('Akun Firebase lama tidak cocok dengan alias NIK Sensus.');
+  }
+  if (authUser.disabled === true) throw new Error('Akun Firebase lama sedang dinonaktifkan. Periksa statusnya sebelum aktivasi.');
+  var oldProfile = readFirestoreDocument_(projectId, apiKey, oauthToken, 'users/' + uid) || {};
+  if (oldProfile.wargaId && String(oldProfile.wargaId) !== wargaId) {
+    throw new Error('Akun Firebase untuk NIK ini sudah tertaut ke data Sensus lain.');
+  }
+  if (oldProfile.nik && String(oldProfile.nik).replace(/\D/g, '') !== nik) {
+    throw new Error('NIK pada profil akun Firebase lama tidak cocok.');
+  }
+  var update = UrlFetchApp.fetch(authBase + ':update', {
+    method: 'post', contentType: 'application/json',
+    headers: { Authorization: 'Bearer ' + oauthToken },
+    payload: JSON.stringify({ localId: uid, password: dob }), muteHttpExceptions: true
+  });
+  if (update.getResponseCode() !== 200) {
+    throw new Error('Password sementara akun lama gagal disetel: ' + update.getContentText());
+  }
+  var oldRoles = Array.isArray(oldProfile.roles) && oldProfile.roles.length
+    ? oldProfile.roles.map(function(r) { return String(r).toLowerCase(); })
+    : [String(oldProfile.role || 'warga').toLowerCase()];
+  if (oldRoles.indexOf('warga') < 0) oldRoles.push('warga');
+  var profile = {
+    uid: uid, email: email, nik: nik, nama: String(resident.nama || oldProfile.nama || ''),
+    wargaId: wargaId, role: String(oldProfile.role || 'warga'), roles: oldRoles,
+    telepon: String(resident.telepon || oldProfile.telepon || ''),
+    alamat: String(resident.alamat || oldProfile.alamat || ''),
+    rt: String(resident.rt || oldProfile.rt || ''), rw: String(resident.rw || oldProfile.rw || ''),
+    kawil: String(resident.kawil || oldProfile.kawil || ''),
+    rtId: String(resident.rtId || oldProfile.rtId || ''),
+    rwId: String(resident.rwId || oldProfile.rwId || ''),
+    kawilId: String(resident.kawilId || oldProfile.kawilId || ''),
+    status: oldProfile.status || 'Aktif', mustChangePassword: true,
+    passwordResetAt: { __firestoreTimestamp: new Date().toISOString() },
+    passwordResetBy: actorUid, updatedAt: { __firestoreTimestamp: new Date().toISOString() }
+  };
+  firestorePatchDocument_(projectId, apiKey, oauthToken, 'users/' + uid, profile);
+  return { ok: true, uid: uid, emailAlias: email, message: 'Akun Firebase lama berhasil ditautkan kembali.' };
+}
+
+function rejectResidentAccount_(data, actorUid, actorProfile, actorToken, apiKey, projectId) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) throw new Error('Permintaan akun sedang diproses petugas lain. Coba kembali.');
+  try {
+  var requestId = String(data.requestId || '').trim();
+  var reason = String(data.alasan || '').trim();
+  if (!requestId) throw new Error('ID permintaan tidak valid.');
+  if (reason.length < 5) throw new Error('Alasan penolakan wajib diisi minimal 5 karakter.');
+  var requestPath = 'kampung/kiarajangkung/permintaan_akun/' + requestId;
+  var request = readFirestoreDocument_(projectId, apiKey, actorToken, requestPath);
+  if (!request) throw new Error('Permintaan akun tidak ditemukan.');
+  var approverRole = verifyAccountRequestApprover_(actorProfile, request);
+  if (String(request.status || '') !== 'menunggu') throw new Error('Permintaan ini sudah diproses.');
+  var stamp = { __firestoreTimestamp: new Date().toISOString() };
+  var wargaId = String(request.wargaId || '');
+  var auditId = Utilities.getUuid();
+  var oauthToken = ScriptApp.getOAuthToken();
+  var writes = [
+    firestoreUpdateWrite_(projectId, requestPath, {
+      status: 'ditolak', alasanPenolakan: reason, diprosesOlehUid: actorUid,
+      diprosesOlehRole: approverRole, diprosesPada: stamp, updatedAt: stamp
+    }),
+    firestoreUpdateWrite_(projectId, 'kampung/kiarajangkung/permintaan_akun_index/' + wargaId, {
+      requestId: requestId, status: 'ditolak', updatedAt: stamp
+    }),
+    firestoreUpdateWrite_(projectId, 'kampung/kiarajangkung/riwayat_akun/' + auditId, {
+      aksi: 'pendaftaran_ditolak', wargaId: wargaId, requestId: requestId,
+      alasan: reason, olehUid: actorUid, olehRole: approverRole, waktu: stamp
+    })
+  ];
+  commitFirestoreWrites_(projectId, apiKey, oauthToken, writes);
+  return { ok: true, message: 'Permintaan pendaftaran ditolak dan alasannya dicatat.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function listFirestoreDocuments_(projectId, apiKey, token, collectionPath) {
+  var result = [];
+  var pageToken = '';
+  do {
+    var url = 'https://firestore.googleapis.com/v1/projects/' + encodeURIComponent(projectId) +
+      '/databases/(default)/documents/' + collectionPath.split('/').map(encodeURIComponent).join('/') +
+      '?pageSize=1000&key=' + encodeURIComponent(apiKey) + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+    var response = UrlFetchApp.fetch(url, { method: 'get', headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+    if (response.getResponseCode() !== 200) throw new Error('Gagal membaca daftar akun pengelola.');
+    var body = JSON.parse(response.getContentText() || '{}');
+    (body.documents || []).forEach(function(raw) {
+      var fields = {};
+      Object.keys(raw.fields || {}).forEach(function(k) { fields[k] = decodeFirestoreValue_(raw.fields[k]); });
+      var nameParts = String(raw.name || '').split('/');
+      result.push({ id: nameParts[nameParts.length - 1], data: fields });
+    });
+    pageToken = body.nextPageToken || '';
+  } while (pageToken && result.length < 5000);
+  return result;
+}
+
+function notifyAccountApprovers_(projectId, apiKey, token, requestId, request) {
+  var users = listFirestoreDocuments_(projectId, apiKey, token, 'users');
+  var targets = [];
+  users.forEach(function(user) {
+    var roles = accountRequestRoleSet_(user.data);
+    var isAdmin = roles.indexOf('admin') >= 0;
+    var isRt = roles.indexOf('ketua_rt') >= 0 && String(user.data.rtId || '') &&
+      String(user.data.rtId || '') === String(request.rtId || '');
+    if ((isAdmin || isRt) && String(user.data.status || '').toLowerCase() === 'aktif') targets.push(user.id);
+  });
+  var stamp = { __firestoreTimestamp: new Date().toISOString() };
+  targets.forEach(function(uid) {
+    var notificationId = 'akun_' + requestId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    firestorePatchDocument_(projectId, apiKey, token,
+      'users/' + uid + '/notifikasi/' + notificationId, {
+        kategori: 'akun', jenis: 'permintaan_akun', judul: 'Permintaan akun warga',
+        pesan: String(request.nama || 'Warga') + ' mengajukan pembuatan akun. Periksa wilayah dan data Sensus.',
+        referensiJenis: 'permintaan_akun', referensiId: requestId,
+        isRead: false, createdAt: stamp
+      });
+  });
+}
+
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
