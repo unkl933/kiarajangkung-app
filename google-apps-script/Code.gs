@@ -145,7 +145,7 @@ function doPost(e) {
       error: String(err && err.message ? err.message : err),
       tahap: tahap,
       action: data.action || 'tidak terkirim',
-      build: 'SOS-FCM-CODEGS-20261117-V2'
+      build: 'SOS-FCM-CODEGS-20261118-V4'
     });
   }
 }
@@ -164,7 +164,7 @@ function sendSosNotification_(data, callerUid, apiKey, projectId) {
   var oauthToken = ScriptApp.getOAuthToken();
   if (!oauthToken) throw new Error('OAuth Google Apps Script tidak tersedia.');
 
-  var sos = readFirestoreDocument_(projectId, apiKey, oauthToken, 'laporan_sos/' + sosId);
+  var sos = readFirestoreDocument_(projectId, apiKey, oauthToken, 'kampung/kiarajangkung/laporan_sos/' + sosId);
   if (!sos) throw new Error('Laporan SOS tidak ditemukan.');
   if (String(sos.pemohonUid || '') !== String(callerUid)) {
     throw new Error('Akun ini bukan pembuat laporan SOS tersebut.');
