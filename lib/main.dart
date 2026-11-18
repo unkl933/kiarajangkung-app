@@ -6076,6 +6076,11 @@ Future<void> showRecordForm(
                         'updatedBy': Db.auth.currentUser?.uid,
                       };
                       if (module.keyName == 'sensus') {
+                        payload['statusValidasi'] = 'perlu_validasi';
+                        payload['validasiDiajukanPada'] = FieldValue.serverTimestamp();
+                        payload['validasiDiajukanOlehUid'] = Db.auth.currentUser?.uid ?? '';
+                        payload['validasiDiajukanOlehNama'] = Db.auth.currentUser?.displayName ?? '';
+                        payload['validasiSumber'] = 'input_admin';
                         payload['nik'] = normalizeNik((payload['nik'] ?? '').toString());
                         payload['statusWarga'] = (payload['statusWarga'] ?? 'Aktif').toString().trim().isEmpty ? 'Aktif' : payload['statusWarga'];
                         final kawilLabel = (payload['kawil'] ?? '').toString();
@@ -6215,6 +6220,11 @@ Future<void> showRecordForm(
                         } else {
                           final recordRef = Db.module(module.keyName).doc(docId);
                           if (module.keyName == 'sensus') {
+                            payload['statusValidasi'] = 'perlu_validasi';
+                            payload['validasiDiajukanPada'] = FieldValue.serverTimestamp();
+                            payload['validasiDiajukanOlehUid'] = Db.auth.currentUser?.uid ?? '';
+                            payload['validasiDiajukanOlehNama'] = Db.auth.currentUser?.displayName ?? '';
+                            payload['validasiSumber'] = 'edit_admin';
                             final nik = (payload['nik'] ?? '').toString();
                             final oldNik = normalizeNik((initial?['nik'] ?? '').toString());
                             final allSensus = await Db.module('sensus').get();
@@ -6733,6 +6743,11 @@ class _MigrasiSatuDataPageState extends State<MigrasiSatuDataPage> {
           safeData['wargaId'] = id;
           safeData['updatedAt'] = FieldValue.serverTimestamp();
           safeData['updatedBy'] = Db.auth.currentUser?.uid ?? '';
+          safeData['statusValidasi'] = 'perlu_validasi';
+          safeData['validasiDiajukanPada'] = FieldValue.serverTimestamp();
+          safeData['validasiDiajukanOlehUid'] = Db.auth.currentUser?.uid ?? '';
+          safeData['validasiDiajukanOlehNama'] = Db.auth.currentUser?.displayName ?? '';
+          safeData['validasiSumber'] = 'impor_excel';
           if (!residentSnap.exists) {
             safeData['createdAt'] = FieldValue.serverTimestamp();
             safeData['createdBy'] = Db.auth.currentUser?.uid ?? '';
@@ -7049,6 +7064,11 @@ class _InformasiDiriPageState extends State<InformasiDiriPage>{
                                   for (final e in controllers.entries)
                                     e.key: e.value.text.trim(),
                                   'updatedAt': FieldValue.serverTimestamp(),
+                                  'statusValidasi': 'perlu_validasi',
+                                  'validasiDiajukanPada': FieldValue.serverTimestamp(),
+                                  'validasiDiajukanOlehUid': Db.auth.currentUser?.uid ?? '',
+                                  'validasiDiajukanOlehNama': (data['nama'] ?? '').toString(),
+                                  'validasiSumber': 'informasi_diri',
                                 };
                                 await Db.module('sensus')
                                     .doc(wargaId)
