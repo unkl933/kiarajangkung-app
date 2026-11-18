@@ -138,3 +138,15 @@ Belum ada kode validasi yang diubah pada audit ini. Implementasi harus dilakukan
 - Pelayanan Surat di Flutter memulai status `diajukan`, RT mengubah ke `diperiksa_rt`, RW ke `diverifikasi_rw`, dan Kawil ke `disetujui`; petugas dapat mengembalikan dengan `perlu_perbaikan` atau `ditolak`. Pemohon mengirim ulang setelah perbaikan.
 - Pengaduan dimulai pada `menunggu_validasi_rt`; alur RT -> RW -> Kawil memakai `menunggu_validasi_rw` -> `menunggu_validasi_kawil` -> `terverifikasi` -> `ditindaklanjuti` -> `selesai`. Petugas dapat meminta perbaikan pada tahap masing-masing (`perlu_perbaikan_rt/rw/kawil`) atau menolak; pemohon mengirim ulang ke tahap yang meminta perbaikan.
 - Rangkaian di atas sesuai dengan transisi yang ditemukan pada Flutter dan rules. Tetap periksa metode pembaruan dan payload riwayat sebelum membuat listener Mi5 agar notifikasi dikirim hanya ketika status/peristiwa benar-benar berubah.
+
+## Implementasi validasi Sensus — tahap metadata (2026-11-18)
+- Data Sensus baru dari formulir Admin/Owner otomatis diberi `statusValidasi: perlu_validasi`.
+- Edit Sensus oleh Admin/Owner otomatis mengajukan ulang validasi.
+- Edit Informasi Diri oleh warga otomatis mengajukan validasi; aturan Firestore membatasi metadata yang dapat ditulis warga: status harus `perlu_validasi`, UID pengaju harus UID login, timestamp harus `request.time`, dan sumber harus `informasi_diri`.
+- Impor Excel Sensus untuk data baru maupun pembaruan otomatis mengajukan validasi.
+- Metadata yang dipakai: `statusValidasi`, `validasiDiajukanPada`, `validasiDiajukanOlehUid`, `validasiDiajukanOlehNama`, `validasiSumber`.
+- `statusWarga` (Aktif/Arsip) tidak diubah oleh mekanisme ini.
+- Belum termasuk halaman antrean/review petugas, tindakan setujui/perlu perbaikan, penandaan manual data lama, notifikasi, dan uji emulator/build. Jangan menganggap alur validasi sudah operasional sampai tahap-tahap itu selesai dan diuji.
+- Commit kode Flutter: `e063b30f990aa64162ce7bf6786988b587d668d0`.
+- Commit aturan Firestore: `b9c839ed994ccf4ba374e58b9ed67c6d61f33006`.
+
