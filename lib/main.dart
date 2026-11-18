@@ -4731,8 +4731,14 @@ class _KoordinasiWilayahPageState extends State<KoordinasiWilayahPage> with Sing
   Future<void> _queuePush({required String targetLevel, required Map<String, dynamic> area, required String title, required String message}) async {
     try {
       await Db.module('notifikasi').add({
-        ...area, 'jenis': 'agenda', 'targetLevel': targetLevel,
-        'judul': title, 'pesan': message, 'status': 'menunggu',
+        ...area,
+        'jenis': 'agenda',
+        'targetLevel': targetLevel,
+        'judul': title,
+        'pesan': message,
+        'dibuatOlehUid': _uid,
+        'dibuatOlehNama': _name,
+        'status': 'menunggu',
         'createdAt': FieldValue.serverTimestamp(),
       });
     } catch (_) {
