@@ -272,7 +272,10 @@ exports.generalNotificationCreated = onDocumentCreated(
     if (!claimed) return;
 
     try {
-      const targetLevel = String(data.targetLevel || 'kampung').toLowerCase();
+      const rawTargetLevel = String(data.targetLevel || 'kampung').toLowerCase();
+      const targetLevel = ['kawil', 'perangkat_kawil'].includes(rawTargetLevel) ? 'kawil' :
+        ['rw', 'ketua_rw'].includes(rawTargetLevel) ? 'rw' :
+        ['rt', 'ketua_rt'].includes(rawTargetLevel) ? 'rt' : 'kampung';
       const areaKeys = targetLevel === 'kawil' ? ['kawilId'] :
         targetLevel === 'rw' ? ['kawilId', 'rwId'] :
         targetLevel === 'rt' ? ['kawilId', 'rwId', 'rtId'] : [];
