@@ -120,3 +120,16 @@ Daftar ini adalah konteks modul yang pernah disebut/dikerjakan; sebelum mengubah
 - Gunakan repo dan branch yang sudah ada; jangan mulai proyek baru.
 - Berikan langkah praktis, satu tahap yang jelas saat perlu tindakan manual di HP/Termux.
 - Jelaskan dengan jujur apa yang sudah diubah, apa yang baru direncanakan, dan apa yang belum diuji.
+
+## Audit teknis validasi Sensus (18 November 2026)
+
+Pemeriksaan kode aktual pada branch `backup` menemukan jalur berikut:
+- Formulir Admin/Owner membuat dokumen `sensus` dan `sensus_nik_index` dalam transaksi; metadata validasi harus dibuat dalam alur transaksi yang sama agar tidak ada data baru tanpa antrean.
+- Formulir Admin/Owner mengubah dokumen Sensus dan indeks NIK dalam transaksi; perubahan data harus membuat antrean validasi tanpa merusak pengarsipan dan sinkronisasi profil akun.
+- Halaman `InformasiDiriPage` milik warga mengubah field profil langsung pada dokumen Sensus dan memperbarui profil `users/{uid}`; aturan Firestore saat ini membatasi field perubahan warga. Alur ini perlu menghasilkan antrean validasi dan tetap mempertahankan batas field tersebut.
+- Impor Excel pada `MigrasiSatuDataPage._applyReady()` membuat atau memperbarui dokumen Sensus beserta indeks NIK dalam transaksi. Jalur impor juga harus membuat antrean validasi untuk data baru maupun data yang berubah.
+- Aturan baca koleksi Sensus saat ini hanya mengizinkan Owner/Admin atau pemilik dokumen (`ownsSensus`). Petugas RT/RW/Kawil belum diberi akses baca Sensus secara umum; akses pemeriksaan harus ditambahkan dengan pembatasan wilayah yang sama seperti helper `s2InArea`, bukan membuka seluruh koleksi.
+- Aturan Firestore untuk `users/{uid}/notifikasi/{id}` melarang pembuatan inbox dari aplikasi. Worker Mi5 tetap menjadi pihak yang membuat inbox dan mengirim FCM.
+- Status Pelayanan Surat yang terlihat di rules: `diajukan`, `diperiksa_rt`, `diverifikasi_rw`, `disetujui`, `perlu_perbaikan`, dan `ditolak`. Status Pengaduan menggunakan tahapan `menunggu_validasi_rt`, `menunggu_validasi_rw`, `menunggu_validasi_kawil`, `terverifikasi`, `ditindaklanjuti`, `selesai`, serta status pengembalian/perbaikan dan penolakan. Perlu audit Flutter untuk memastikan semua transisi aktual sebelum listener dibuat.
+
+Belum ada kode validasi yang diubah pada audit ini. Implementasi harus dilakukan bertahap: (1) desain dokumen antrean dan aturan keamanan, (2) sambungkan ke empat jalur simpan Sensus, (3) buat UI antrean dan keputusan petugas sesuai wilayah, (4) integrasikan notifikasi Mi5. Jangan mengaktifkan perubahan rules sebelum uji emulator/akun per role tersedia.
