@@ -11,7 +11,7 @@ function doGet() {
   return json_({
     ok: true,
     message: 'Kampung Digital API aktif.',
-    build: 'SOS-FCM-CODEGS-20261117-V2'
+    build: 'SOS-FCM-CODEGS-20261118-V3'
   });
 }
 
@@ -46,7 +46,7 @@ function doPost(e) {
     var activeProfile = verifyActiveUser_(uid, data.idToken, data.apiKey, projectId);
 
     if (data.action === 'sendSosNotification') {
-      tahap = 'mengirim notifikasi SOS ke Owner/Admin dan Kawil';
+      tahap = 'mengirim notifikasi SOS ke Owner/Admin, Kawil, RW, dan RT';
       return json_(sendSosNotification_(data, uid, data.apiKey, projectId));
     }
 
@@ -170,6 +170,8 @@ function sendSosNotification_(data, callerUid, apiKey, projectId) {
     throw new Error('Akun ini bukan pembuat laporan SOS tersebut.');
   }
   var kawilId = String(sos.kawilId || '').trim();
+  var rwId = String(sos.rwId || '').trim();
+  var rtId = String(sos.rtId || '').trim();
   var users = listFirestoreDocuments_(projectId, apiKey, oauthToken, 'users');
   var targets = [];
   users.forEach(function(user) {
@@ -179,13 +181,23 @@ function sendSosNotification_(data, callerUid, apiKey, projectId) {
       return String(r).toLowerCase();
     }) : [];
     var primaryRole = String(profile.role || '').toLowerCase();
+    // Akun multi-role tetap dihitung satu kali karena penerima ditambahkan
+    // melalui satu kondisi gabungan, bukan satu entri per role.
     var isOwnerAdmin = primaryRole === 'owner' || primaryRole === 'admin' ||
       roles.indexOf('owner') >= 0 || roles.indexOf('admin') >= 0;
-    var isMatchingKawil = kawilId &&
-      (primaryRole === 'perangkat_kawil' || primaryRole === 'kawil' ||
-       roles.indexOf('perangkat_kawil') >= 0 || roles.indexOf('kawil') >= 0) &&
+    var isKawilRole = primaryRole === 'perangkat_kawil' || primaryRole === 'kawil' ||
+      roles.indexOf('perangkat_kawil') >= 0 || roles.indexOf('kawil') >= 0;
+    var isRwRole = primaryRole === 'ketua_rw' || roles.indexOf('ketua_rw') >= 0;
+    var isRtRole = primaryRole === 'ketua_rt' || roles.indexOf('ketua_rt') >= 0;
+    var isMatchingKawil = !!kawilId && isKawilRole &&
       String(profile.kawilId || '').trim() === kawilId;
-    if (isOwnerAdmin || isMatchingKawil) targets.push({ uid: user.id, profile: profile });
+    var isMatchingRw = !!rwId && isRwRole &&
+      String(profile.rwId || '').trim() === rwId;
+    var isMatchingRt = !!rtId && isRtRole &&
+      String(profile.rtId || '').trim() === rtId;
+    if (isOwnerAdmin || isMatchingKawil || isMatchingRw || isMatchingRt) {
+      targets.push({ uid: user.id, profile: profile });
+    }
   });
 
   var title = 'SOS DARURAT • ' + String(sos.jenis || 'MEMBUTUHKAN BANTUAN').toUpperCase();
@@ -209,7 +221,10 @@ function sendSosNotification_(data, callerUid, apiKey, projectId) {
       'users/' + target.uid + '/notifikasi/' + notificationId, {
         kategori: 'darurat', jenis: 'sos', judul: title, pesan: body,
         referensiJenis: 'laporan_sos', referensiId: sosId,
-        kawilId: kawilId, lokasiMaps: mapUrl, isRead: false, createdAt: stamp
+        kawil: String(sos.kawil || ''), kawilId: kawilId,
+        rw: String(sos.rw || ''), rwId: rwId,
+        rt: String(sos.rt || ''), rtId: rtId,
+        lokasiMaps: mapUrl, isRead: false, createdAt: stamp
       });
     inboxWritten++;
 
@@ -258,7 +273,7 @@ function sendSosNotification_(data, callerUid, apiKey, projectId) {
     pushTerkirim: sent, pushGagal: failed, perangkatTanpaToken: noToken,
     detailError: fcmErrors,
     catatan: !targets.length
-      ? 'Belum ditemukan akun Owner/Admin aktif atau Kawil aktif yang cocok dengan wilayah SOS.'
+      ? 'Belum ditemukan akun petugas aktif (Owner/Admin/Kawil/RW/RT) yang cocok dengan wilayah SOS.'
       : (failed > 0 ? 'FCM menolak ' + failed + ' pengiriman. ' + fcmErrors.join(' | ')
         : (sent === 0 ? 'Inbox tersimpan, tetapi belum ada token FCM pada perangkat petugas.' : ''))
   };
