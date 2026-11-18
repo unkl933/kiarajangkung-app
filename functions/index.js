@@ -254,7 +254,7 @@ exports.generalNotificationCreated = onDocumentCreated(
     if (!snap) return;
     const data = snap.data() || {};
     const jenis = String(data.jenis || '').toLowerCase();
-    if (jenis === 'sos' || data.status !== 'menunggu') return;
+    if (jenis === 'sos' || !['menunggu', 'baru'].includes(String(data.status || '').toLowerCase())) return;
 
     const ref = snap.ref;
     const claimed = await db.runTransaction(async tx => {
@@ -290,6 +290,18 @@ exports.generalNotificationCreated = onDocumentCreated(
         (Array.isArray(user.fcmTokens) ? user.fcmTokens : []).forEach(token => {
           if (typeof token === 'string' && token.trim()) tokens.add(token.trim());
         });
+      }
+      // Pastikan pembuat agenda/instruksi juga menerima salinan inbox,
+      // meskipun ia tidak cocok dengan filter area penerima.
+      const creatorUid = String(data.dibuatOlehUid || data.createdByUid || '');
+      if (creatorUid && !recipients.some(doc => doc.id === creatorUid)) {
+        const creator = await db.collection('users').doc(creatorUid).get();
+        if (creator.exists) {
+          recipients.push(creator);
+          (Array.isArray(creator.data()?.fcmTokens) ? creator.data().fcmTokens : []).forEach(token => {
+            if (typeof token === 'string' && token.trim()) tokens.add(token.trim());
+          });
+        }
       }
 
       const title = String(data.judul || 'Informasi Kampung');
@@ -380,13 +392,16 @@ function complaintRecipients(users, complaint, nextStatus, previousStatus) {
       if (match) add(doc, user);
     }
   }
-  if (previousStatus && nextStatus !== previousStatus) {
+  // Pelapor menerima konfirmasi saat pengaduan pertama kali dikirim,
+  // kemudian menerima setiap perubahan status berikutnya.
+  if ((!previousStatus || nextStatus !== previousStatus) &&
+      (nextStatus === 'menunggu_validasi_rt' ||
+       ['menunggu_validasi_rw', 'menunggu_validasi_kawil', 'terverifikasi',
+        'ditindaklanjuti', 'selesai', 'ditolak', 'perlu_perbaikan_rt',
+        'perlu_perbaikan_rw', 'perlu_perbaikan_kawil'].includes(nextStatus))) {
     const authorUid = String(complaint.pemohonUid || '');
     const author = users.docs.find(doc => doc.id === authorUid);
-    if (author && ['menunggu_validasi_rw', 'menunggu_validasi_kawil', 'terverifikasi',
-      'ditindaklanjuti', 'selesai', 'ditolak', 'perlu_perbaikan_rt', 'perlu_perbaikan_rw', 'perlu_perbaikan_kawil'].includes(nextStatus)) {
-      add(author, author.data() || {});
-    }
+    if (author) add(author, author.data() || {});
   }
   return [...recipients.entries()].map(([uid, value]) => ({ uid, ...value }));
 }
@@ -469,3 +484,156 @@ exports.complaintNotificationChanged = onDocumentWritten(
   }
 );
 
+
+
+// Pengumuman kampung: kirim push dan salinan inbox saat diterbitkan atau
+// diperbarui. Pengumuman tanpa target wilayah berlaku untuk seluruh kampung.
+exports.announcementNotificationChanged = onDocumentWritten(
+  'kampung/kiarajangkung/pengumuman/{announcementId}',
+  async event => {
+    const before = event.data?.before?.data() || null;
+    const after = event.data?.after?.data() || null;
+    if (!after) return;
+    const status = String(after.status || 'aktif').toLowerCase();
+    if (['draf', 'nonaktif', 'arsip'].includes(status)) return;
+    if (before && JSON.stringify(before) === JSON.stringify(after)) return;
+
+    const users = await db.collection('users').get();
+    const targetLevelRaw = String(after.targetLevel || 'kampung').toLowerCase();
+    const targetLevel = ['kawil', 'perangkat_kawil'].includes(targetLevelRaw) ? 'kawil' :
+      ['rw', 'ketua_rw'].includes(targetLevelRaw) ? 'rw' :
+      ['rt', 'ketua_rt'].includes(targetLevelRaw) ? 'rt' : 'kampung';
+    const keys = targetLevel === 'kawil' ? ['kawilId'] :
+      targetLevel === 'rw' ? ['kawilId', 'rwId'] :
+      targetLevel === 'rt' ? ['kawilId', 'rwId', 'rtId'] : [];
+    const recipients = new Map();
+    for (const doc of users.docs) {
+      const user = doc.data() || {};
+      if (keys.some(key => !String(after[key] || '').trim() ||
+        String(user[key] || '').trim() !== String(after[key] || '').trim())) continue;
+      recipients.set(doc.id, { ref: doc.ref, user });
+    }
+    const creatorUid = String(after.dibuatOlehUid || after.createdByUid || '');
+    if (creatorUid && !recipients.has(creatorUid)) {
+      const creator = await db.collection('users').doc(creatorUid).get();
+      if (creator.exists) recipients.set(creatorUid, { ref: creator.ref, user: creator.data() || {} });
+    }
+    const title = String(after.judul || after.nama || 'Pengumuman Kampung');
+    const body = String(after.isi || after.deskripsi || after.keterangan || 'Ada pengumuman baru di Kampung Digital Kiarajangkung.');
+    await deliverUserNotifications({
+      recipients: [...recipients.entries()].map(([uid, value]) => ({ uid, ...value })),
+      eventKey: 'pengumuman_' + event.id,
+      jenis: 'pengumuman',
+      title, body,
+      referensiJenis: 'pengumuman',
+      referensiId: event.params.announcementId,
+      screen: 'notifikasi'
+    });
+  }
+);
+
+// Pelayanan surat: petugas pada tahap berikutnya menerima tugas baru,
+// sedangkan pemohon selalu menerima konfirmasi dan setiap perubahan status.
+exports.serviceLetterNotificationChanged = onDocumentWritten(
+  'kampung/kiarajangkung/pelayanan_surat/{letterId}',
+  async event => {
+    const before = event.data?.before?.data() || null;
+    const after = event.data?.after?.data() || null;
+    if (!after) return;
+    const nextStatus = String(after.status || '');
+    const previousStatus = String(before?.status || '');
+    if (before && nextStatus === previousStatus) return;
+
+    const users = await db.collection('users').get();
+    const recipients = new Map();
+    const add = (doc, user) => recipients.set(doc.id, { uid: doc.id, ref: doc.ref, user });
+    const same = key => String(after[key] || '').trim();
+    const matches = (user, role, keys) => roleSet(user).has(role) &&
+      keys.every(key => same(key) && String(user[key] || '').trim() === same(key));
+    const stage = nextStatus === 'diajukan' ? 'rt' :
+      nextStatus === 'diperiksa_rt' ? 'rw' :
+      nextStatus === 'diverifikasi_rw' ? 'kawil' : '';
+    for (const doc of users.docs) {
+      const user = doc.data() || {};
+      const match = stage === 'rt' ? matches(user, 'ketua_rt', ['kawilId', 'rwId', 'rtId']) :
+        stage === 'rw' ? matches(user, 'ketua_rw', ['kawilId', 'rwId']) :
+        stage === 'kawil' ? matches(user, 'perangkat_kawil', ['kawilId']) : false;
+      if (match) add(doc, user);
+    }
+    const applicantUid = String(after.pemohonUid || '');
+    if (applicantUid) {
+      const applicant = users.docs.find(doc => doc.id === applicantUid);
+      if (applicant) add(applicant, applicant.data() || {});
+    }
+    if (!recipients.size) return;
+
+    const labels = {
+      diajukan: ['Pengajuan Pelayanan Baru', 'Ada permohonan surat baru yang menunggu pemeriksaan Ketua RT.'],
+      diperiksa_rt: ['Pengajuan Diperiksa RT', 'Permohonan surat diteruskan untuk verifikasi Ketua RW.'],
+      diverifikasi_rw: ['Pengajuan Diverifikasi RW', 'Permohonan surat menunggu persetujuan Kawil.'],
+      disetujui: ['Surat Disetujui', 'Permohonan surat Anda telah disetujui. Buka aplikasi untuk melihat dokumen.'],
+      perlu_perbaikan: ['Pengajuan Perlu Diperbaiki', 'Petugas meminta perbaikan pada permohonan surat Anda. Buka aplikasi untuk melihat catatan.'],
+      ditolak: ['Pengajuan Ditolak', 'Permohonan surat Anda tidak dapat dilanjutkan. Buka aplikasi untuk melihat keterangannya.']
+    };
+    const [title, body] = labels[nextStatus] || ['Pembaruan Pelayanan', 'Ada pembaruan pada permohonan pelayanan Anda.'];
+    await deliverUserNotifications({
+      recipients: [...recipients.values()],
+      eventKey: 'pelayanan_' + event.id,
+      jenis: 'pelayanan',
+      title, body,
+      referensiJenis: 'pelayanan_surat',
+      referensiId: event.params.letterId,
+      status: nextStatus,
+      screen: 'pelayanan'
+    });
+  }
+);
+
+// Membuat inbox per akun lebih dahulu, lalu mengirim push ke seluruh token unik.
+// ID berbasis event menjaga agar retry Cloud Functions tidak menggandakan pesan.
+async function deliverUserNotifications({ recipients, eventKey, jenis, title, body,
+  referensiJenis, referensiId, status, screen }) {
+  const tokens = new Set();
+  for (const recipient of recipients) {
+    const inboxRef = recipient.ref.collection('notifikasi').doc(
+      String(eventKey).replace(/[^a-zA-Z0-9_-]/g, '_')
+    );
+    const shouldSend = await db.runTransaction(async tx => {
+      const existing = await tx.get(inboxRef);
+      if (existing.exists) return false;
+      tx.create(inboxRef, {
+        categoria: jenis,
+        kategori: jenis,
+        jenis,
+        judul: title,
+        pesan: body,
+        referensiJenis,
+        referensiId,
+        ...(status ? { status } : {}),
+        ...(screen ? { screen } : {}),
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      return true;
+    });
+    if (!shouldSend) continue;
+    (Array.isArray(recipient.user.fcmTokens) ? recipient.user.fcmTokens : [])
+      .forEach(token => {
+        if (typeof token === 'string' && token.trim()) tokens.add(token.trim());
+      });
+  }
+  const tokenList = [...tokens];
+  for (let i = 0; i < tokenList.length; i += 500) {
+    await admin.messaging().sendEachForMulticast({
+      tokens: tokenList.slice(i, i + 500),
+      notification: { title, body },
+      data: {
+        type: jenis,
+        screen: screen || 'notifikasi',
+        referensiJenis: referensiJenis || '',
+        referensiId: referensiId || ''
+      },
+      android: { priority: 'high' }
+    });
+  }
+}
