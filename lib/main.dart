@@ -1136,10 +1136,218 @@ class _DashboardQuickAction extends StatelessWidget {
   );
 }
 
-class NotificationInboxPage extends StatelessWidget {
+class NotificationInboxPage extends StatefulWidget {
   const NotificationInboxPage({super.key});
+  @override
+  State<NotificationInboxPage> createState() => _NotificationInboxPageState();
+}
 
-  DateTime _date(dynamic value) => value is Timestamp ? value.toDate() : DateTime.tryParse((value ?? '').toString()) ?? DateTime.now();
+class _NotificationInboxPageState extends State<NotificationInboxPage> {
+  DateTime _date(dynamic value) => value is Timestamp
+      ? value.toDate()
+      : DateTime.tryParse((value ?? '').toString()) ?? DateTime.now();
+
+  bool _isSos(Map<String, dynamic> data) =>
+      (data['jenis'] ?? '').toString().toLowerCase() == 'sos' ||
+      (data['kategori'] ?? '').toString().toLowerCase() == 'darurat';
+
+  Future<void> _respondToSos(
+    BuildContext context,
+    DocumentReference<Map<String, dynamic>> sosRef,
+  ) async {
+    final uid = Db.auth.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+    final note = TextEditingController();
+    String? selectedStatus;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Tanggapi SOS'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Tuliskan tindakan petugas. Respons wajib diisi sebelum notifikasi dapat dihapus.'),
+              const SizedBox(height: 10),
+              TextField(
+                controller: note,
+                minLines: 2,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Respons / tindakan *',
+                  hintText: 'Contoh: Sudah menghubungi pelapor dan menuju lokasi.',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text('Status penanganan', style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 6),
+              Wrap(spacing: 8, children: [
+                ChoiceChip(
+                  label: const Text('Sedang ditangani'),
+                  selected: selectedStatus == 'diproses',
+                  onSelected: (_) => setDialogState(() => selectedStatus = 'diproses'),
+                ),
+                ChoiceChip(
+                  label: const Text('Selesai'),
+                  selected: selectedStatus == 'selesai',
+                  onSelected: (_) => setDialogState(() => selectedStatus = 'selesai'),
+                ),
+              ]),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Batal')),
+            FilledButton(
+              onPressed: selectedStatus == null ? null : () => Navigator.pop(dialogContext, selectedStatus),
+              child: const Text('Kirim Respons'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null) { note.dispose(); return; }
+    final responseText = note.text.trim();
+    note.dispose();
+    if (responseText.length < 5) {
+      if (mounted) showMessage(context, 'Respons minimal 5 karakter.');
+      return;
+    }
+    try {
+      final profileSnap = await Db.user(uid).get();
+      final profile = profileSnap.data() ?? <String, dynamic>{};
+      final officerName = (profile['nama'] ?? profile['name'] ??
+          Db.auth.currentUser?.displayName ?? 'Petugas').toString();
+      final responseEntry = <String, dynamic>{
+        'uid': uid,
+        'nama': officerName,
+        'status': result,
+        'catatan': responseText,
+        'waktu': Timestamp.now(),
+      };
+      await sosRef.update({
+        'status': result,
+        'petugasMerespons': FieldValue.arrayUnion([responseEntry]),
+        'catatanPetugas': responseText,
+        'ditanganiOlehUid': uid,
+        'ditanganiOlehNama': officerName,
+        'updatedAt': FieldValue.serverTimestamp(),
+        if (result == 'selesai') 'selesaiAt': FieldValue.serverTimestamp(),
+      });
+      if (mounted) showMessage(context, result == 'selesai'
+          ? 'SOS ditandai selesai. Notifikasi sekarang dapat dihapus.'
+          : 'Respons tersimpan. Status SOS: sedang ditangani.');
+    } catch (error) {
+      if (mounted) showMessage(context, 'Gagal menyimpan respons SOS: ' + error.toString());
+    }
+  }
+
+  Future<void> _showSosDetails(
+    BuildContext context,
+    QueryDocumentSnapshot<Map<String, dynamic>> notification,
+  ) async {
+    final data = notification.data();
+    final sosId = (data['referensiId'] ?? '').toString().trim();
+    if (sosId.isEmpty) {
+      if (mounted) showMessage(context, 'Referensi laporan SOS tidak ditemukan.');
+      return;
+    }
+    try {
+      final sosRef = Db.module('laporan_sos').doc(sosId);
+      final sosSnap = await sosRef.get();
+      if (!sosSnap.exists) {
+        if (mounted) showMessage(context, 'Laporan SOS sudah tidak ditemukan.');
+        return;
+      }
+      final sos = sosSnap.data() ?? <String, dynamic>{};
+      final status = (sos['status'] ?? 'baru').toString().toLowerCase();
+      final lat = sos['latitude'];
+      final lon = sos['longitude'];
+      final hasLocation = lat is num && lon is num;
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Row(children: [
+            Icon(Icons.sos_rounded, color: Color(0xFFC62828)),
+            SizedBox(width: 8),
+            Expanded(child: Text('SOS DARURAT')),
+          ]),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _DetailLine(label: 'Jenis darurat', value: (sos['jenis'] ?? 'Darurat').toString()),
+                _DetailLine(label: 'Pelapor', value: (sos['pemohonNama'] ?? '-').toString()),
+                _DetailLine(label: 'Telepon', value: (sos['pemohonTelepon'] ?? '-').toString()),
+                _DetailLine(label: 'Wilayah', value: 'RT ' + (sos['rt'] ?? '-').toString() + ' / RW ' + (sos['rw'] ?? '-').toString() + ' • ' + (sos['kawil'] ?? '-').toString()),
+                _DetailLine(label: 'Keterangan', value: (sos['uraian'] ?? '-').toString()),
+                _DetailLine(label: 'Patokan lokasi', value: (sos['lokasiManual'] ?? '-').toString()),
+                _DetailLine(label: 'Status', value: status.toUpperCase()),
+                if ((sos['ditanganiOlehNama'] ?? '').toString().isNotEmpty)
+                  _DetailLine(label: 'Petugas', value: sos['ditanganiOlehNama'].toString()),
+                if ((sos['catatanPetugas'] ?? '').toString().isNotEmpty)
+                  _DetailLine(label: 'Respons terakhir', value: sos['catatanPetugas'].toString()),
+                if (sos['petugasMerespons'] is List && (sos['petugasMerespons'] as List).isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  const Text('Riwayat respons', style: TextStyle(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 4),
+                  ...((sos['petugasMerespons'] as List).map((entry) {
+                    if (entry is Map) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 5),
+                        child: Text('• ' + (entry['nama'] ?? 'Petugas').toString() + ': ' + (entry['catatan'] ?? '').toString()),
+                      );
+                    }
+                    return Text('• ' + entry.toString());
+                  })),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Tutup')),
+            if (hasLocation)
+              TextButton.icon(
+                onPressed: () => launchUrl(
+                  Uri.parse('https://www.google.com/maps/search/?api=1&query=' + lat.toString() + ',' + lon.toString()),
+                  mode: LaunchMode.externalApplication,
+                ),
+                icon: const Icon(Icons.map_outlined),
+                label: const Text('Lokasi'),
+              ),
+            if (status != 'selesai')
+              FilledButton.icon(
+                onPressed: () async {
+                  Navigator.pop(dialogContext);
+                  await _respondToSos(context, sosRef);
+                },
+                icon: const Icon(Icons.reply_rounded),
+                label: const Text('Tanggapi SOS'),
+              ),
+            if (status == 'diproses' || status == 'selesai')
+              TextButton.icon(
+                onPressed: () async {
+                  try {
+                    await notification.reference.delete();
+                    if (dialogContext.mounted) Navigator.pop(dialogContext);
+                    if (mounted) showMessage(context, 'Notifikasi SOS dihapus dari kotak masuk. Arsip laporan tetap tersimpan.');
+                  } catch (error) {
+                    if (mounted) showMessage(context, 'Notifikasi belum dapat dihapus: ' + error.toString());
+                  }
+                },
+                icon: const Icon(Icons.delete_outline),
+                label: const Text('Hapus notifikasi'),
+              ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) showMessage(context, 'Gagal membuka detail SOS: ' + error.toString());
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1151,7 +1359,7 @@ class NotificationInboxPage extends StatelessWidget {
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: query.snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) return Center(child: Text('Gagal memuat notifikasi: ${snapshot.error}'));
+          if (snapshot.hasError) return Center(child: Text('Gagal memuat notifikasi: ' + snapshot.error.toString()));
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
           final docs = snapshot.data!.docs;
           if (docs.isEmpty) return const Center(child: Padding(
@@ -1161,7 +1369,7 @@ class NotificationInboxPage extends StatelessWidget {
               SizedBox(height: 10),
               Text('Belum ada notifikasi', style: TextStyle(fontWeight: FontWeight.w700)),
               SizedBox(height: 4),
-              Text('Pemberitahuan pengaduan dan pengumuman akan muncul di sini.', textAlign: TextAlign.center, style: TextStyle(color: Colors.black54)),
+              Text('Pemberitahuan pengaduan, pengumuman, dan SOS darurat akan muncul di sini.', textAlign: TextAlign.center, style: TextStyle(color: Colors.black54)),
             ]),
           ));
           return ListView.separated(
@@ -1172,25 +1380,48 @@ class NotificationInboxPage extends StatelessWidget {
               final doc = docs[index];
               final data = doc.data();
               final read = data['isRead'] == true || data['readAt'] != null;
+              final isSos = _isSos(data);
               final type = (data['kategori'] ?? data['jenis'] ?? 'informasi').toString();
-              final icon = type == 'pengaduan' ? Icons.support_agent_outlined : type == 'pengumuman' ? Icons.campaign_outlined : Icons.notifications_active_outlined;
+              final icon = isSos ? Icons.sos_rounded
+                  : type == 'pengaduan' ? Icons.support_agent_outlined
+                  : type == 'pengumuman' ? Icons.campaign_outlined
+                  : Icons.notifications_active_outlined;
               final date = _date(data['createdAt']);
               return Card(
-                color: read ? null : const Color(0xFFFFF8F2),
+                color: isSos ? const Color(0xFFFFEEEE) : (read ? null : const Color(0xFFFFF8F2)),
                 child: ListTile(
-                  leading: CircleAvatar(backgroundColor: const Color(0xFFFCEAEA), child: Icon(icon, color: const Color(0xFFC94B4B))),
-                  title: Text((data['judul'] ?? 'Pemberitahuan').toString(), style: TextStyle(fontWeight: read ? FontWeight.w500 : FontWeight.w800)),
+                  leading: CircleAvatar(
+                    backgroundColor: isSos ? const Color(0xFFFFDADA) : const Color(0xFFFCEAEA),
+                    child: Icon(icon, color: const Color(0xFFC62828)),
+                  ),
+                  title: Text(
+                    (data['judul'] ?? (isSos ? 'SOS DARURAT' : 'Pemberitahuan')).toString(),
+                    style: TextStyle(fontWeight: read ? FontWeight.w500 : FontWeight.w800,
+                      color: isSos ? const Color(0xFFB71C1C) : null),
+                  ),
                   subtitle: Padding(
                     padding: const EdgeInsets.only(top: 5),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text((data['pesan'] ?? data['isi'] ?? '').toString()),
                       const SizedBox(height: 5),
-                      Text('${date.day.toString().padLeft(2, '0')}-${date.month.toString().padLeft(2, '0')}-${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}', style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                      Text(date.day.toString().padLeft(2, '0') + '-' +
+                        date.month.toString().padLeft(2, '0') + '-' + date.year.toString() + ' ' +
+                        date.hour.toString().padLeft(2, '0') + ':' + date.minute.toString().padLeft(2, '0'),
+                        style: const TextStyle(fontSize: 11, color: Colors.black54)),
+                      if (isSos) const Padding(
+                        padding: EdgeInsets.only(top: 5),
+                        child: Text('Ketuk untuk melihat lokasi dan memberikan respons',
+                          style: TextStyle(fontSize: 11, color: Color(0xFFB71C1C), fontWeight: FontWeight.w700)),
+                      ),
                     ]),
                   ),
-                  trailing: read ? const Icon(Icons.check_circle_outline, color: Colors.grey) : const Icon(Icons.circle, color: Color(0xFFC94B4B), size: 11),
+                  trailing: read ? const Icon(Icons.check_circle_outline, color: Colors.grey)
+                      : const Icon(Icons.circle, color: Color(0xFFC94B4B), size: 11),
                   onTap: () async {
-                    if (!read) await doc.reference.update({'isRead': true, 'readAt': FieldValue.serverTimestamp()});
+                    if (!read) await doc.reference.update({
+                      'isRead': true, 'readAt': FieldValue.serverTimestamp(),
+                    });
+                    if (isSos) await _showSosDetails(context, doc);
                   },
                 ),
               );
@@ -1904,8 +2135,10 @@ class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
       : <String>{};
     final role = (widget.profile['role'] ?? '').toString();
     return widget.isAdmin || role == 'owner' || role == 'admin' ||
-      role == 'perangkat_kawil' || roles.contains('owner') ||
-      roles.contains('admin') || roles.contains('perangkat_kawil');
+      role == 'perangkat_kawil' || role == 'ketua_rw' || role == 'ketua_rt' ||
+      roles.contains('owner') || roles.contains('admin') ||
+      roles.contains('perangkat_kawil') || roles.contains('ketua_rw') ||
+      roles.contains('ketua_rt');
   }
   Query<Map<String, dynamic>> get _sosQuery {
     final roles = (widget.profile['roles'] is List)
@@ -1914,10 +2147,15 @@ class _EmergencyCenterPageState extends State<EmergencyCenterPage> {
     final role = (widget.profile['role'] ?? '').toString();
     final global = widget.isAdmin || role == 'owner' || role == 'admin' ||
       roles.contains('owner') || roles.contains('admin');
+    final isKawil = role == 'perangkat_kawil' || roles.contains('perangkat_kawil');
+    final isRw = role == 'ketua_rw' || roles.contains('ketua_rw');
+    final isRt = role == 'ketua_rt' || roles.contains('ketua_rt');
     final query = Db.module('laporan_sos');
-    return global
-      ? query.limit(50)
-      : query.where('kawilId', isEqualTo: widget.profile['kawilId'] ?? '').limit(50);
+    if (global) return query.limit(50);
+    if (isKawil) return query.where('kawilId', isEqualTo: widget.profile['kawilId'] ?? '').limit(50);
+    if (isRw) return query.where('rwId', isEqualTo: widget.profile['rwId'] ?? '').limit(50);
+    if (isRt) return query.where('rtId', isEqualTo: widget.profile['rtId'] ?? '').limit(50);
+    return query.where('pemohonUid', isEqualTo: _uid).limit(50);
   }
   String get _name => (widget.profile['nama'] ?? widget.profile['name'] ?? Db.auth.currentUser?.displayName ?? 'Warga').toString();
   Map<String, dynamic> get _area => {
