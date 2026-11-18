@@ -681,8 +681,14 @@ match /kampung/kiarajangkung/laporan_sos/{sosId} {
                   'statusPerkawinan','pendidikan','pekerjaan','hubunganKeluarga',
                   'alamat','golonganDarah','kewarganegaraan',
                   'statusDalamKeluarga','kodePos','email','noHp','noTelp',
-                  'namaAyah','namaIbu','keterangan','updatedAt'
+                  'namaAyah','namaIbu','keterangan','updatedAt',
+                  'statusValidasi','validasiDiajukanPada','validasiDiajukanOlehUid',
+                  'validasiDiajukanOlehNama','validasiSumber'
                 ]) &&
+                request.resource.data.get('statusValidasi', '') == 'perlu_validasi' &&
+                request.resource.data.get('validasiDiajukanOlehUid', '') == request.auth.uid &&
+                request.resource.data.get('validasiDiajukanPada', null) == request.time &&
+                request.resource.data.get('validasiSumber', '') == 'informasi_diri' &&
                 request.resource.data.get('nama','') == resource.data.get('nama','') &&
                 request.resource.data.get('nik','') == resource.data.get('nik','') &&
                 request.resource.data.get('noKK','') == resource.data.get('noKK','') &&
