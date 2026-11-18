@@ -3752,7 +3752,7 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
     ));
     if (ok == true) {
       await _runBusy(() async {
-        await Db.module('kegiatan_rt').add({
+        final activityRef = await Db.module('kegiatan_rt').add({
           'judul': title.text.trim(), 'deskripsi': description.text.trim(), 'tanggal': date.text.trim(),
           'waktu': time.text.trim(), 'lokasi': place.text.trim(), ..._areaPayload(),
           'status': publish ? 'terbit' : 'draf', 'dibuatOlehUid': _uid, 'dibuatOlehNama': _name(),
@@ -3760,11 +3760,13 @@ class _PelayananMasyarakatPageState extends State<PelayananMasyarakatPage>
           'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
         });
         if (publish) {
-          // Antrean push agenda; Cloud Function Tahap 2 mengirimkannya ke token FCM warga.
+          // Status menunggu diproses Cloud Function; pembuat dan warga sasaran
+          // akan mendapat inbox serta push notification.
           await Db.module('notifikasi').add({
             'jenis': 'agenda', 'judul': title.text.trim(), 'pesan': 'Ada kegiatan baru: ${title.text.trim()}',
             ..._areaPayload(), 'targetLevel': _ownerAdmin ? 'kampung' : _kawil ? 'kawil' : _rw ? 'rw' : 'rt',
-            'status': 'baru', 'createdAt': FieldValue.serverTimestamp(),
+            'dibuatOlehUid': _uid, 'referensiJenis': 'kegiatan_rt', 'referensiId': activityRef.id,
+            'status': 'menunggu', 'createdAt': FieldValue.serverTimestamp(),
           });
         }
       });
