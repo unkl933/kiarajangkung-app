@@ -133,3 +133,8 @@ Pemeriksaan kode aktual pada branch `backup` menemukan jalur berikut:
 - Status Pelayanan Surat yang terlihat di rules: `diajukan`, `diperiksa_rt`, `diverifikasi_rw`, `disetujui`, `perlu_perbaikan`, dan `ditolak`. Status Pengaduan menggunakan tahapan `menunggu_validasi_rt`, `menunggu_validasi_rw`, `menunggu_validasi_kawil`, `terverifikasi`, `ditindaklanjuti`, `selesai`, serta status pengembalian/perbaikan dan penolakan. Perlu audit Flutter untuk memastikan semua transisi aktual sebelum listener dibuat.
 
 Belum ada kode validasi yang diubah pada audit ini. Implementasi harus dilakukan bertahap: (1) desain dokumen antrean dan aturan keamanan, (2) sambungkan ke empat jalur simpan Sensus, (3) buat UI antrean dan keputusan petugas sesuai wilayah, (4) integrasikan notifikasi Mi5. Jangan mengaktifkan perubahan rules sebelum uji emulator/akun per role tersedia.
+
+### Hasil pemeriksaan lanjutan alur Pelayanan/Pengaduan di Flutter
+- Pelayanan Surat di Flutter memulai status `diajukan`, RT mengubah ke `diperiksa_rt`, RW ke `diverifikasi_rw`, dan Kawil ke `disetujui`; petugas dapat mengembalikan dengan `perlu_perbaikan` atau `ditolak`. Pemohon mengirim ulang setelah perbaikan.
+- Pengaduan dimulai pada `menunggu_validasi_rt`; alur RT -> RW -> Kawil memakai `menunggu_validasi_rw` -> `menunggu_validasi_kawil` -> `terverifikasi` -> `ditindaklanjuti` -> `selesai`. Petugas dapat meminta perbaikan pada tahap masing-masing (`perlu_perbaikan_rt/rw/kawil`) atau menolak; pemohon mengirim ulang ke tahap yang meminta perbaikan.
+- Rangkaian di atas sesuai dengan transisi yang ditemukan pada Flutter dan rules. Tetap periksa metode pembaruan dan payload riwayat sebelum membuat listener Mi5 agar notifikasi dikirim hanya ketika status/peristiwa benar-benar berubah.
