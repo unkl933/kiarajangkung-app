@@ -143,6 +143,16 @@ function s6CanUpdateSos() {
       in ['baru','diproses','selesai','dibatalkan'] &&
     request.resource.data.get('petugasMerespons', resource.data.get('petugasMerespons', [])) is list;
 }
+function s6CanDeleteSosInbox() {
+  let sosPath = /databases/$(database)/documents/kampung/kiarajangkung/laporan_sos/$(resource.data.get('referensiId', ''));
+  return s2Staff() &&
+    resource.data.get('jenis', '') == 'sos' &&
+    resource.data.get('referensiJenis', '') == 'laporan_sos' &&
+    resource.data.get('referensiId', '') is string &&
+    exists(sosPath) &&
+    s2InArea(get(sosPath).data) &&
+    get(sosPath).data.get('status', 'baru') in ['diproses', 'selesai', 'dibatalkan'];
+}
 function s6OwnSosNotificationCreate() {
   return s2SignedIn() &&
     request.resource.data.get('jenis', '') == 'sos' &&
@@ -384,7 +394,10 @@ function s6OwnSosNotificationCreate() {
 
     match /users/{userId}/notifikasi/{notificationId} {
       allow read: if signedIn() && request.auth.uid == userId;
-      allow create, delete: if false;
+      allow create: if false;
+      // Hanya salinan inbox SOS milik petugas yang boleh dihapus setelah ditanggapi.
+      // Dokumen asli laporan_sos tetap diarsipkan.
+      allow delete: if signedIn() && request.auth.uid == userId && s6CanDeleteSosInbox();
       allow update: if signedIn() && request.auth.uid == userId &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt']) &&
         request.resource.data.get('isRead', false) == true;
