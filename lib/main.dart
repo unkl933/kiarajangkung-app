@@ -369,21 +369,71 @@ Future<void> updateUserProfileIfExists(String uid, Map<String, dynamic> updates)
 
 class PushService {
   static final Set<String> _registered = <String>{};
+  static final Set<String> _registering = <String>{};
+  static final Map<String, StreamSubscription<String>> _tokenSubscriptions =
+      <String, StreamSubscription<String>>{};
+
+  static Future<void> _saveToken(String uid, String token) async {
+    await Db.user(uid).set({
+      'fcmTokens': FieldValue.arrayUnion([token]),
+      'pushEnabled': true,
+      'pushUpdatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   static Future<void> register(User user) async {
-    if (_registered.contains(user.uid)) return;
-    _registered.add(user.uid);
+    final uid = user.uid;
+    if (_registered.contains(uid) || _registering.contains(uid)) return;
+
+    _registering.add(uid);
+
     try {
       final messaging = FirebaseMessaging.instance;
-      await messaging.requestPermission(alert: true, badge: true, sound: true);
+
+      final settings = await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      debugPrint(
+        '[PushService] Izin notifikasi untuk $uid: '
+        '${settings.authorizationStatus}',
+      );
+
+      // Pasang listener sebelum mengambil token agar perubahan token
+      // tidak terlewat selama proses registrasi.
+      _tokenSubscriptions.putIfAbsent(
+        uid,
+        () => messaging.onTokenRefresh.listen(
+          (newToken) async {
+            try {
+              await _saveToken(uid, newToken);
+              debugPrint('[PushService] Token baru berhasil disimpan untuk $uid.');
+            } catch (error, stackTrace) {
+              debugPrint('[PushService] Gagal menyimpan token baru untuk $uid: $error');
+              debugPrintStack(stackTrace: stackTrace);
+            }
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            debugPrint('[PushService] Error stream token untuk $uid: $error');
+            debugPrintStack(stackTrace: stackTrace);
+          },
+        ),
+      );
+
       final token = await messaging.getToken();
-      if (token != null && token.isNotEmpty) {
-        await Db.user(user.uid).set({'fcmTokens': FieldValue.arrayUnion([token]), 'pushEnabled': true, 'pushUpdatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+      if (token == null || token.trim().isEmpty) {
+        throw StateError('Firebase tidak mengembalikan token FCM.');
       }
-      messaging.onTokenRefresh.listen((newToken) async {
-        await Db.user(user.uid).set({'fcmTokens': FieldValue.arrayUnion([newToken]), 'pushEnabled': true, 'pushUpdatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
-      });
-    } catch (_) {
-      _registered.remove(user.uid);
+
+      await _saveToken(uid, token.trim());
+      _registered.add(uid);
+      debugPrint('[PushService] Token FCM berhasil didaftarkan untuk $uid.');
+    } catch (error, stackTrace) {
+      debugPrint('[PushService] Gagal mendaftarkan FCM untuk $uid: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    } finally {
+      _registering.remove(uid);
     }
   }
 }
