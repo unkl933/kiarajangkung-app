@@ -244,6 +244,108 @@ exports.sosNotificationCreated = onDocumentCreated(
   }
 );
 
+// Antrean notifikasi umum: pengumuman, instruksi, tugas, dan undangan rapat.
+// Dokumen antrean dibuat oleh aplikasi; Cloud Function menentukan penerima dari
+// profil users agar pengirim tidak dapat memilih akun/token secara sembarang.
+exports.generalNotificationCreated = onDocumentCreated(
+  'kampung/kiarajangkung/notifikasi/{notificationId}',
+  async event => {
+    const snap = event.data;
+    if (!snap) return;
+    const data = snap.data() || {};
+    const jenis = String(data.jenis || '').toLowerCase();
+    if (jenis === 'sos' || data.status !== 'menunggu') return;
+
+    const ref = snap.ref;
+    const claimed = await db.runTransaction(async tx => {
+      const current = await tx.get(ref);
+      const value = current.data() || {};
+      if (value.pushStatus === 'terkirim') return false;
+      const attemptedAt = value.pushAttemptAt?.toDate?.()?.getTime?.() || 0;
+      if (value.pushStatus === 'memproses' && Date.now() - attemptedAt < 5 * 60 * 1000) return false;
+      tx.update(ref, {
+        pushStatus: 'memproses',
+        pushAttemptAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      return true;
+    });
+    if (!claimed) return;
+
+    try {
+      const targetLevel = String(data.targetLevel || 'kampung').toLowerCase();
+      const areaKeys = targetLevel === 'kawil' ? ['kawilId'] :
+        targetLevel === 'rw' ? ['kawilId', 'rwId'] :
+        targetLevel === 'rt' ? ['kawilId', 'rwId', 'rtId'] : [];
+      const usersSnap = await db.collection('users').get();
+      const recipients = [];
+      const tokens = new Set();
+      for (const userDoc of usersSnap.docs) {
+        const user = userDoc.data() || {};
+        if (areaKeys.some(key => !String(data[key] || '').trim() ||
+          String(user[key] || '').trim() !== String(data[key] || '').trim())) continue;
+        recipients.push(userDoc);
+        (Array.isArray(user.fcmTokens) ? user.fcmTokens : []).forEach(token => {
+          if (typeof token === 'string' && token.trim()) tokens.add(token.trim());
+        });
+      }
+
+      const title = String(data.judul || 'Informasi Kampung');
+      const body = String(data.pesan || 'Ada informasi baru di Kampung Digital Kiarajangkung.');
+      const inboxId = 'info_' + event.params.notificationId;
+      for (let i = 0; i < recipients.length; i += 400) {
+        const batch = db.batch();
+        for (const recipient of recipients.slice(i, i + 400)) {
+          batch.set(recipient.ref.collection('notifikasi').doc(inboxId), {
+            kategori: jenis === 'agenda' ? 'pengumuman' : jenis || 'informasi',
+            jenis: jenis || 'informasi',
+            judul: title,
+            pesan: body,
+            targetLevel,
+            referensiId: event.params.notificationId,
+            isRead: false,
+            createdAt: data.createdAt || admin.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+        }
+        await batch.commit();
+      }
+
+      const tokenList = [...tokens];
+      let sent = 0;
+      let failed = 0;
+      for (let i = 0; i < tokenList.length; i += 500) {
+        const group = tokenList.slice(i, i + 500);
+        const result = await admin.messaging().sendEachForMulticast({
+          tokens: group,
+          notification: { title, body },
+          data: {
+            type: jenis || 'informasi',
+            screen: 'notifikasi',
+            notificationId: event.params.notificationId
+          },
+          android: { priority: 'high' }
+        });
+        sent += result.successCount;
+        failed += result.failureCount;
+      }
+      await ref.update({
+        pushStatus: 'terkirim',
+        pushJumlahPenerima: recipients.length,
+        pushJumlahToken: tokenList.length,
+        pushBerhasil: sent,
+        pushGagal: failed,
+        pushSentAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    } catch (error) {
+      await ref.update({
+        pushStatus: 'gagal',
+        pushError: String(error?.message || error).slice(0, 500),
+        pushFailedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      throw error;
+    }
+  }
+);
+
 // Notifikasi pengaduan berjenjang. Dokumen inbox dibuat per pengguna
 // dengan ID berbasis event agar retry Cloud Functions tidak menggandakan pesan.
 function roleSet(user) {
