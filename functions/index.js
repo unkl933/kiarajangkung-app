@@ -602,7 +602,6 @@ async function deliverUserNotifications({ recipients, eventKey, jenis, title, bo
       const existing = await tx.get(inboxRef);
       if (existing.exists) return false;
       tx.create(inboxRef, {
-        categoria: jenis,
         kategori: jenis,
         jenis,
         judul: title,
