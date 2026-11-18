@@ -4728,11 +4728,11 @@ class _KoordinasiWilayahPageState extends State<KoordinasiWilayahPage> with Sing
     finally { if (mounted) setState(() => _busy = false); }
   }
 
-  Future<void> _queuePush({required String targetLevel, required Map<String, dynamic> area, required String title, required String message}) async {
+  Future<void> _queuePush({required String jenis, required String targetLevel, required Map<String, dynamic> area, required String title, required String message}) async {
     try {
-      await Db.module('notifikasi').add({
+      final ref = await Db.module('notifikasi').add({
         ...area,
-        'jenis': 'agenda',
+        'jenis': jenis,
         'targetLevel': targetLevel,
         'judul': title,
         'pesan': message,
@@ -4741,8 +4741,13 @@ class _KoordinasiWilayahPageState extends State<KoordinasiWilayahPage> with Sing
         'status': 'menunggu',
         'createdAt': FieldValue.serverTimestamp(),
       });
-    } catch (_) {
-      // Dokumen utama tetap tersimpan walau antrean push belum tersedia.
+      debugPrint('[Notifikasi] Antrean $jenis berhasil dibuat: ${ref.id}');
+    } catch (error, stackTrace) {
+      debugPrint('[Notifikasi] GAGAL membuat antrean $jenis: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (mounted) {
+        showMessage(context, 'Data tersimpan, tetapi antrean push gagal dibuat: $error');
+      }
     }
   }
 
@@ -4812,7 +4817,7 @@ class _KoordinasiWilayahPageState extends State<KoordinasiWilayahPage> with Sing
         'status': 'terkirim', 'dibuatOlehUid': _uid, 'dibuatOlehNama': _name, 'dibuatOlehLevel': _level,
         'createdAt': now, 'updatedAt': now,
       });
-      await _queuePush(targetLevel: targetLevel, area: targetArea, title: 'Instruksi wilayah: ${title.text.trim()}', message: body.text.trim());
+      await _queuePush(jenis: 'instruksi', targetLevel: targetLevel, area: targetArea, title: 'Instruksi wilayah: ${title.text.trim()}', message: body.text.trim());
     });
     title.dispose(); body.dispose(); deadline.dispose();
   }
@@ -4845,7 +4850,7 @@ class _KoordinasiWilayahPageState extends State<KoordinasiWilayahPage> with Sing
         'judul': title.text.trim(), 'uraian': detail.text.trim(), 'tenggat': deadline.text.trim(), 'status': 'ditugaskan',
         'dibuatOlehUid': _uid, 'dibuatOlehNama': _name, 'dibuatOlehLevel': _level, 'createdAt': now, 'updatedAt': now,
       });
-      await _queuePush(targetLevel: targetLevel, area: area, title: 'Tugas baru: ${title.text.trim()}', message: detail.text.trim());
+      await _queuePush(jenis: 'tugas', targetLevel: targetLevel, area: area, title: 'Tugas baru: ${title.text.trim()}', message: detail.text.trim());
     });
     title.dispose(); detail.dispose(); deadline.dispose();
   }
@@ -4899,7 +4904,7 @@ class _KoordinasiWilayahPageState extends State<KoordinasiWilayahPage> with Sing
         'dibuatOlehUid': _uid, 'dibuatOlehNama': _name, 'dibuatOlehLevel': _level,
         'createdAt': FieldValue.serverTimestamp(), 'updatedAt': FieldValue.serverTimestamp(),
       });
-      await _queuePush(targetLevel: _level == 'admin' ? 'kampung' : _level, area: meetingArea, title: 'Undangan rapat: ${title.text.trim()}', message: '${date.text.trim()} ${time.text.trim()} • ${place.text.trim()}');
+      await _queuePush(jenis: 'agenda', targetLevel: _level == 'admin' ? 'kampung' : _level, area: meetingArea, title: 'Undangan rapat: ${title.text.trim()}', message: '${date.text.trim()} ${time.text.trim()} • ${place.text.trim()}');
     });
     title.dispose(); date.dispose(); time.dispose(); place.dispose(); agenda.dispose();
   }
@@ -4971,7 +4976,7 @@ class _KoordinasiWilayahPageState extends State<KoordinasiWilayahPage> with Sing
       await Db.module('koordinasi_pengumuman').add({...announcementArea, 'targetLevel': _level, 'publik': true, 'judul': title.text.trim(), 'isi': body.text.trim(),
         'status': 'terbit', 'dibuatOlehUid': _uid, 'dibuatOlehNama': _name, 'dibuatOlehLevel': _level,
         'createdAt': FieldValue.serverTimestamp()});
-      await _queuePush(targetLevel: _level == 'admin' ? 'kampung' : _level, area: announcementArea, title: title.text.trim(), message: body.text.trim());
+      await _queuePush(jenis: 'pengumuman', targetLevel: _level == 'admin' ? 'kampung' : _level, area: announcementArea, title: title.text.trim(), message: body.text.trim());
     });
     title.dispose(); body.dispose();
   }
