@@ -1212,6 +1212,165 @@ class _AccountRequestsPageState extends State<AccountRequestsPage> {
     ));
   }
 }
+class Mi5ServerStatus extends StatefulWidget {
+  const Mi5ServerStatus({super.key});
+
+  @override
+  State<Mi5ServerStatus> createState() => _Mi5ServerStatusState();
+}
+
+class _Mi5ServerStatusState extends State<Mi5ServerStatus> {
+  // Alamat Mi5 pada jaringan lokal. Perangkat harus berada pada jaringan
+  // yang dapat menjangkau router kamar.
+  static final Uri _serverUri = Uri.parse('http://192.168.1.11:3000/');
+  final HttpClient _client = HttpClient()
+    ..connectionTimeout = const Duration(seconds: 4);
+
+  Timer? _timer;
+  bool? _isOnline;
+  bool _checking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkServer();
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) => _checkServer());
+  }
+
+  Future<void> _checkServer() async {
+    if (_checking) return;
+    _checking = true;
+    var online = false;
+    try {
+      final request = await _client.getUrl(_serverUri)
+          .timeout(const Duration(seconds: 5));
+      final response = await request.close()
+          .timeout(const Duration(seconds: 5));
+      final body = await utf8.decoder.bind(response)
+          .join().timeout(const Duration(seconds: 5));
+      if (response.statusCode == HttpStatus.ok) {
+        final data = jsonDecode(body);
+        online = data is Map &&
+            data['status'] == 'online' &&
+            data['service'] == 'Kampung Digital Notification Server';
+      }
+    } catch (_) {
+      online = false;
+    } finally {
+      _checking = false;
+    }
+
+    if (!mounted) return;
+    final previous = _isOnline;
+    setState(() => _isOnline = online);
+
+    if (previous == true && !online) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Server notifikasi Mi5 tidak dapat dihubungi. HP mati atau jaringan terputus.'),
+          backgroundColor: Color(0xFFB93838),
+          duration: Duration(seconds: 6),
+        ),
+      );
+    } else if (previous == false && online) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Server notifikasi Mi5 sudah kembali online.'),
+          backgroundColor: Color(0xFF27834A),
+        ),
+      );
+    }
+  }
+
+  void _showStatus() {
+    final online = _isOnline == true;
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(online ? 'Server Mi5 Online' : 'Server Mi5 Offline'),
+        content: Text(online
+            ? 'Server notifikasi Mi5 dapat dihubungi.'
+            : 'Server Mi5 tidak dapat dihubungi. Periksa apakah HP Mi5 menyala, server berjalan, dan jaringan terhubung. Status diperiksa otomatis setiap 30 detik.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Tutup'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _checkServer();
+            },
+            child: const Text('Cek lagi'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _client.close(force: true);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final online = _isOnline;
+    final color = online == null
+        ? const Color(0xFF858B94)
+        : online
+            ? const Color(0xFF27834A)
+            : const Color(0xFFB93838);
+    final label = online == null ? 'CEK' : online ? 'MI5' : 'OFF';
+    return Padding(
+      padding: const EdgeInsets.only(right: 2),
+      child: Tooltip(
+        message: online == null
+            ? 'Memeriksa server Mi5'
+            : online
+                ? 'Server Mi5 online'
+                : 'Server Mi5 tidak dapat dihubungi',
+        child: InkWell(
+          onTap: _showStatus,
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  online == null
+                      ? Icons.sync_rounded
+                      : online
+                          ? Icons.cloud_done_rounded
+                          : Icons.cloud_off_rounded,
+                  size: 16,
+                  color: color,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class HomePage extends StatefulWidget {
   final User user;
   final Map<String, dynamic> profile;
@@ -1275,6 +1434,7 @@ class _HomePageState extends State<HomePage> {
           const Flexible(child: Text('Kampung Kiarajangkung', maxLines: 1, overflow: TextOverflow.ellipsis)),
         ]),
         actions: [
+          const Mi5ServerStatus(),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: Db.user(widget.user.uid).collection('notifikasi').where('isRead', isEqualTo: false).limit(50).snapshots(),
             builder: (context, snapshot) {
